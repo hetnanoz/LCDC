@@ -30,7 +30,7 @@ Public Function LoadLHSInput( _
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    arrColumns = Array(1&, 9&, 115&, 114&, 116&, 130&, 160&, 71&, 68&, 66&, 35&, 15&, 16&)
+    arrColumns = Array(1&, 9&, 115&, 114&, 116&, 130&, 134&, 71&, 68&, 66&, 35&, 15&, 16&)
     arrHeaders = Array( _
         "FUND CODE", _
         "EXTERNAL VALUE CODE", _
