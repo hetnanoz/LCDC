@@ -112,7 +112,12 @@ Public Function LoadNeolinkInput( _
             arrOutput(lngOutputRow, 1) = strFundCode
 
             For lngSourceCol = 1 To 6
-                arrOutput(lngOutputRow, lngSourceCol + 1) = arrSource(lngRow, lngSourceCol)
+                If lngSourceCol = 5 Or lngSourceCol = 6 Then
+                    arrOutput(lngOutputRow, lngSourceCol + 1) = _
+                        NormalizeNeolinkDateValue(arrSource(lngRow, lngSourceCol))
+                Else
+                    arrOutput(lngOutputRow, lngSourceCol + 1) = arrSource(lngRow, lngSourceCol)
+                End If
             Next lngSourceCol
 
             lngOutputRow = lngOutputRow + 1
@@ -141,6 +146,88 @@ ErrHandler:
     Call ErrorManager.addError( _
         CLASS_NAME, METHOD_NAME, errNumber, errDescription, _
         "strFullPath", strFullPath)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-09-08
+' Parameters:    vValue - source Neolink date value
+' Returns:       Variant - Excel date serial or unchanged non-date value
+' Description:   Parses explicit DD/MM/YYYY text without locale-dependent CDate.
+'-------------------------------------------------------------------------------
+Private Function NormalizeNeolinkDateValue(ByVal vValue As Variant) As Variant
+    Const METHOD_NAME As String = "NormalizeNeolinkDateValue"
+    Dim arrParts As Variant
+    Dim datParsed As Date
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngDay As Long
+    Dim lngMonth As Long
+    Dim lngYear As Long
+    Dim strValue As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If IsError(vValue) Or IsEmpty(vValue) Then
+        NormalizeNeolinkDateValue = vValue
+        GoTo ExitPoint
+    End If
+
+    If VarType(vValue) = vbDate Then
+        NormalizeNeolinkDateValue = CDbl(CDate(vValue))
+        GoTo ExitPoint
+    End If
+
+    If IsNumeric(vValue) Then
+        NormalizeNeolinkDateValue = CDbl(vValue)
+        GoTo ExitPoint
+    End If
+
+    strValue = Trim$(CStr(vValue))
+    If Len(strValue) = 0 Then
+        NormalizeNeolinkDateValue = vbNullString
+        GoTo ExitPoint
+    End If
+
+    arrParts = Split(strValue, "/")
+
+    If UBound(arrParts) - LBound(arrParts) = 2 Then
+        If Len(CStr(arrParts(0))) <= 2 And Len(CStr(arrParts(1))) <= 2 And _
+           Len(CStr(arrParts(2))) = 4 Then
+
+            If IsNumeric(arrParts(0)) And IsNumeric(arrParts(1)) And IsNumeric(arrParts(2)) Then
+                lngDay = CLng(arrParts(0))
+                lngMonth = CLng(arrParts(1))
+                lngYear = CLng(arrParts(2))
+
+                If lngDay >= 1 And lngDay <= 31 And lngMonth >= 1 And lngMonth <= 12 And _
+                   lngYear >= 1900 And lngYear <= 9999 Then
+
+                    datParsed = DateSerial(lngYear, lngMonth, lngDay)
+
+                    If Day(datParsed) = lngDay And Month(datParsed) = lngMonth And _
+                       Year(datParsed) = lngYear Then
+                        NormalizeNeolinkDateValue = CDbl(datParsed)
+                        GoTo ExitPoint
+                    End If
+                End If
+            End If
+        End If
+    End If
+
+    NormalizeNeolinkDateValue = vValue
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Function
 
