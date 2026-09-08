@@ -1,37 +1,67 @@
 Option Explicit
 
 Private Const CLASS_NAME As String = "modWorkbookIO"
-Private Const MAPPING_SHEET_NAME As String = "Mapping"
 Private Const ERR_WORKBOOK_IO As Long = vbObjectError + 6200
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
 ' Creation date: 2026-09-08
-' Parameters:    strRangeName - named range located on Mapping sheet
-' Returns:       String - trimmed value stored in the named range
-' Description:   Reads a mandatory path/configuration value from Mapping.
+' Parameters:    strRangeName - required named cell in this macro workbook
+' Returns:       String - trimmed value stored in the named cell
+' Description:   Reads a mandatory path from a named cell on any worksheet.
+'                Workbook-level and worksheet-level names are supported.
 '-------------------------------------------------------------------------------
-Public Function GetMappingPath(ByVal strRangeName As String) As String
-    Const METHOD_NAME As String = "GetMappingPath"
+Public Function GetNamedPath(ByVal strRangeName As String) As String
+    Const METHOD_NAME As String = "GetNamedPath"
     Dim errDescription As String
     Dim errNumber As Long
+    Dim lngMatches As Long
+    Dim nmeCandidate As Excel.Name
+    Dim nmeFound As Excel.Name
+    Dim rngNamed As Excel.Range
+    Dim strLocalName As String
     Dim strValue As String
-    Dim wksMapping As Excel.Worksheet
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    Set wksMapping = ThisWorkbook.Worksheets(MAPPING_SHEET_NAME)
-    strValue = Trim$(CStr(wksMapping.Range(strRangeName).Value2))
+    For Each nmeCandidate In ThisWorkbook.Names
+        strLocalName = GetUnqualifiedName(CStr(nmeCandidate.Name))
+
+        If StrComp(strLocalName, strRangeName, vbTextCompare) = 0 Then
+            lngMatches = lngMatches + 1
+            Set nmeFound = nmeCandidate
+        End If
+    Next nmeCandidate
+
+    If lngMatches = 0 Then
+        Err.Raise ERR_WORKBOOK_IO, METHOD_NAME, _
+                  "Named cell '" & strRangeName & "' was not found in the macro workbook."
+    ElseIf lngMatches > 1 Then
+        Err.Raise ERR_WORKBOOK_IO, METHOD_NAME, _
+                  "Named cell '" & strRangeName & "' exists more than once. " & _
+                  "Keep only one workbook/sheet-level definition with this name."
+    End If
+
+    Set rngNamed = nmeFound.RefersToRange
+
+    If rngNamed.Cells.CountLarge <> 1 Then
+        Err.Raise ERR_WORKBOOK_IO, METHOD_NAME, _
+                  "Named item '" & strRangeName & "' must refer to exactly one cell."
+    End If
+
+    strValue = Trim$(CStr(rngNamed.Value2))
 
     If Len(strValue) = 0 Then
         Err.Raise ERR_WORKBOOK_IO, METHOD_NAME, _
-                  "Mapping value '" & strRangeName & "' is empty."
+                  "Named cell '" & strRangeName & "' is empty."
     End If
 
-    GetMappingPath = strValue
+    GetNamedPath = strValue
 
 ExitPoint:
-    Set wksMapping = Nothing
+    Set rngNamed = Nothing
+    Set nmeFound = Nothing
+    Set nmeCandidate = Nothing
 
     If errNumber <> 0 Then
         Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
@@ -44,6 +74,52 @@ ErrHandler:
     Call ErrorManager.addError( _
         CLASS_NAME, METHOD_NAME, errNumber, errDescription, _
         "strRangeName", strRangeName)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-09-08
+' Parameters:    strDefinedName - workbook/sheet-level Excel defined name
+' Returns:       String - name without workbook/worksheet qualifier
+' Description:   Normalizes Name.Name so sheet-level names can be found safely.
+'-------------------------------------------------------------------------------
+Private Function GetUnqualifiedName(ByVal strDefinedName As String) As String
+    Const METHOD_NAME As String = "GetUnqualifiedName"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngBang As Long
+    Dim strResult As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strResult = strDefinedName
+    lngBang = InStrRev(strResult, "!")
+
+    If lngBang > 0 Then
+        strResult = Mid$(strResult, lngBang + 1)
+    End If
+
+    If Len(strResult) >= 2 Then
+        If Left$(strResult, 1) = "'" And Right$(strResult, 1) = "'" Then
+            strResult = Mid$(strResult, 2, Len(strResult) - 2)
+        End If
+    End If
+
+    GetUnqualifiedName = strResult
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError( _
+        CLASS_NAME, METHOD_NAME, errNumber, errDescription, _
+        "strDefinedName", strDefinedName)
     GoTo ExitPoint
 End Function
 
