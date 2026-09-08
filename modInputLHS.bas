@@ -24,12 +24,14 @@ Public Function LoadLHSInput( _
     Dim errNumber As Long
     Dim lngColIndex As Long
     Dim lngLastRow As Long
+    Dim lngOutputColumn As Long
     Dim lngRow As Long
     Dim wkbSource As Excel.Workbook
     Dim wksSource As Excel.Worksheet
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
+    ' ED = 134. ACCOUNTING DATE_1 is intentionally read from column ED.
     arrColumns = Array(1&, 9&, 115&, 114&, 116&, 130&, 134&, 71&, 68&, 66&, 35&, 15&, 16&)
     arrHeaders = Array( _
         "FUND CODE", _
@@ -70,11 +72,22 @@ Public Function LoadLHSInput( _
                 wksSource.Cells(2, CLng(arrColumns(lngColIndex))), _
                 wksSource.Cells(lngLastRow, CLng(arrColumns(lngColIndex)))).Value2
 
+            lngOutputColumn = lngColIndex + 1
+
             If lngDataRows = 1 Then
-                arrOutput(2, lngColIndex + 1) = arrColumn
+                If IsLHSDateOutputColumn(lngOutputColumn) Then
+                    arrOutput(2, lngOutputColumn) = NormalizeLHSDateValue(arrColumn)
+                Else
+                    arrOutput(2, lngOutputColumn) = arrColumn
+                End If
             Else
                 For lngRow = 1 To lngDataRows
-                    arrOutput(lngRow + 1, lngColIndex + 1) = arrColumn(lngRow, 1)
+                    If IsLHSDateOutputColumn(lngOutputColumn) Then
+                        arrOutput(lngRow + 1, lngOutputColumn) = _
+                            NormalizeLHSDateValue(arrColumn(lngRow, 1))
+                    Else
+                        arrOutput(lngRow + 1, lngOutputColumn) = arrColumn(lngRow, 1)
+                    End If
                 Next lngRow
             End If
         Next lngColIndex
@@ -102,6 +115,125 @@ ErrHandler:
     Call ErrorManager.addError( _
         CLASS_NAME, METHOD_NAME, errNumber, errDescription, _
         "strFullPath", strFullPath)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-09-08
+' Parameters:    lngOutputColumn - column position in the Input LHS output array
+' Returns:       Boolean - True for LHS columns containing dates
+' Description:   Identifies all LHS dates that must remain DD/MM/YYYY.
+'-------------------------------------------------------------------------------
+Private Function IsLHSDateOutputColumn(ByVal lngOutputColumn As Long) As Boolean
+    Const METHOD_NAME As String = "IsLHSDateOutputColumn"
+    Dim errDescription As String
+    Dim errNumber As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Select Case lngOutputColumn
+        Case 3, 4, 7, 10
+            IsLHSDateOutputColumn = True
+        Case Else
+            IsLHSDateOutputColumn = False
+    End Select
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError( _
+        CLASS_NAME, METHOD_NAME, errNumber, errDescription, _
+        "lngOutputColumn", lngOutputColumn)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-09-08
+' Parameters:    vValue - source LHS date value
+' Returns:       Variant - Excel date serial or unchanged non-date value
+' Description:   Parses explicit DD/MM/YYYY text without locale-dependent CDate.
+'-------------------------------------------------------------------------------
+Private Function NormalizeLHSDateValue(ByVal vValue As Variant) As Variant
+    Const METHOD_NAME As String = "NormalizeLHSDateValue"
+    Dim arrParts As Variant
+    Dim datParsed As Date
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngDay As Long
+    Dim lngMonth As Long
+    Dim lngYear As Long
+    Dim strValue As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If IsError(vValue) Or IsEmpty(vValue) Then
+        NormalizeLHSDateValue = vValue
+        GoTo ExitPoint
+    End If
+
+    If VarType(vValue) = vbDate Then
+        NormalizeLHSDateValue = CDbl(CDate(vValue))
+        GoTo ExitPoint
+    End If
+
+    If IsNumeric(vValue) Then
+        NormalizeLHSDateValue = CDbl(vValue)
+        GoTo ExitPoint
+    End If
+
+    strValue = Trim$(CStr(vValue))
+    If Len(strValue) = 0 Then
+        NormalizeLHSDateValue = vbNullString
+        GoTo ExitPoint
+    End If
+
+    arrParts = Split(strValue, "/")
+
+    If UBound(arrParts) - LBound(arrParts) = 2 Then
+        If Len(CStr(arrParts(0))) <= 2 And Len(CStr(arrParts(1))) <= 2 And _
+           Len(CStr(arrParts(2))) = 4 Then
+
+            If IsNumeric(arrParts(0)) And IsNumeric(arrParts(1)) And IsNumeric(arrParts(2)) Then
+                lngDay = CLng(arrParts(0))
+                lngMonth = CLng(arrParts(1))
+                lngYear = CLng(arrParts(2))
+
+                If lngDay >= 1 And lngDay <= 31 And lngMonth >= 1 And lngMonth <= 12 And _
+                   lngYear >= 1900 And lngYear <= 9999 Then
+
+                    datParsed = DateSerial(lngYear, lngMonth, lngDay)
+
+                    If Day(datParsed) = lngDay And Month(datParsed) = lngMonth And _
+                       Year(datParsed) = lngYear Then
+                        NormalizeLHSDateValue = CDbl(datParsed)
+                        GoTo ExitPoint
+                    End If
+                End If
+            End If
+        End If
+    End If
+
+    ' Preserve unexpected non-empty source content instead of guessing its meaning.
+    NormalizeLHSDateValue = vValue
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Function
 
