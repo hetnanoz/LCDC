@@ -45,8 +45,8 @@ Public Sub RunLastCouponDateChecker()
     Application.ScreenUpdating = False
     Application.StatusBar = "Last Coupon Date Checker: reading configuration..."
 
-    strFondslisteFolder = GetMappingPath(ROOT_FONDSLISTE_NAME)
-    strSaveFolder = GetMappingPath(SAVE_PATH_NAME)
+    strFondslisteFolder = GetNamedPath(ROOT_FONDSLISTE_NAME)
+    strSaveFolder = GetNamedPath(SAVE_PATH_NAME)
 
     Call ValidateFolderExists(strFondslisteFolder, "Fondsliste")
     Call ValidateFolderExists(strSaveFolder, "Output")
