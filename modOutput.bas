@@ -3,6 +3,7 @@ Option Explicit
 Private Const CLASS_NAME As String = "modOutput"
 Private Const OUTPUT_BASE_NAME As String = "Last_Coupon_Date_Checker_"
 Private Const ERR_OUTPUT As Long = vbObjectError + 6600
+Private Const LOOKUP_SEPARATOR As String = "|"
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
@@ -44,7 +45,7 @@ Public Function CreateOutputWorkbook( _
     Call WriteArrayToWorksheet(wksLHS, arrLHS)
     Call WriteArrayToWorksheet(wksNeolink, arrNeolink)
 
-    arrOutputAll = BuildOutputAllArray(arrLHS)
+    arrOutputAll = BuildOutputAllArray(arrLHS, arrNeolink)
     Call WriteArrayToWorksheet(wksOutputAll, arrOutputAll)
 
     ' Force all known date columns to the required DD/MM/YYYY display.
@@ -52,7 +53,10 @@ Public Function CreateOutputWorkbook( _
     wksLHS.Columns("G:G").NumberFormat = "dd/mm/yyyy"
     wksLHS.Columns("J:J").NumberFormat = "dd/mm/yyyy"
     wksNeolink.Columns("F:G").NumberFormat = "dd/mm/yyyy"
-    wksOutputAll.Columns("C:E").NumberFormat = "dd/mm/yyyy"
+    wksOutputAll.Columns("C:F").NumberFormat = "dd/mm/yyyy"
+    wksOutputAll.Columns("H:H").NumberFormat = "0"
+
+    Call ApplyMatchFormatting(wksOutputAll)
 
     wksLHS.Rows(1).Font.Bold = True
     wksNeolink.Rows(1).Font.Bold = True
@@ -91,38 +95,179 @@ End Function
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
 ' Creation date: 2026-09-08
-' Parameters:    arrLHS - complete Input LHS array including headers
-' Returns:       Variant - five-column Output_All array including headers
-' Description:   Copies Fund Code, External Value Code, coupon dates and
-'                Accounting Date 1 directly from the LHS staging array.
+' Parameters:    arrLHS - complete Input LHS array; arrNeolink - Neolink array
+' Returns:       Variant - eight-column Output_All array including headers
+' Description:   Adds latest INTR Neolink Payment Date for each Fund + ISIN and
+'                compares it with the LHS Last Coupon Date.
 '-------------------------------------------------------------------------------
-Private Function BuildOutputAllArray(ByVal arrLHS As Variant) As Variant
+Private Function BuildOutputAllArray( _
+    ByVal arrLHS As Variant, ByVal arrNeolink As Variant) As Variant
+
     Const METHOD_NAME As String = "BuildOutputAllArray"
-    Dim arrColumnMap As Variant
     Dim arrResult() As Variant
+    Dim blnHasLastCouponDate As Boolean
+    Dim dictLatestPayment As Object
+    Dim dblLastCouponDate As Double
+    Dim dblPaymentDate As Double
     Dim errDescription As String
     Dim errNumber As Long
-    Dim lngColumn As Long
+    Dim lngLastCouponDay As Long
+    Dim lngPaymentDay As Long
     Dim lngRow As Long
     Dim lngRows As Long
+    Dim strKey As String
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    ' Input LHS positions: 1 Fund, 2 External Value, 3 Last Coupon,
-    ' 4 Next Coupon, 7 Accounting Date 1.
-    arrColumnMap = Array(1&, 2&, 3&, 4&, 7&)
+    Set dictLatestPayment = BuildLatestNeolinkPaymentLookup(arrNeolink)
     lngRows = UBound(arrLHS, 1)
 
-    ReDim arrResult(1 To lngRows, 1 To 5)
+    ReDim arrResult(1 To lngRows, 1 To 8)
 
-    For lngRow = 1 To lngRows
-        For lngColumn = LBound(arrColumnMap) To UBound(arrColumnMap)
-            arrResult(lngRow, lngColumn + 1) = _
-                arrLHS(lngRow, CLng(arrColumnMap(lngColumn)))
-        Next lngColumn
+    arrResult(1, 1) = arrLHS(1, 1)
+    arrResult(1, 2) = arrLHS(1, 2)
+    arrResult(1, 3) = arrLHS(1, 3)
+    arrResult(1, 4) = arrLHS(1, 4)
+    arrResult(1, 5) = arrLHS(1, 7)
+    arrResult(1, 6) = "Neolink Payment Date"
+    arrResult(1, 7) = "Last Coupon Date Match"
+    arrResult(1, 8) = "Difference Days"
+
+    For lngRow = 2 To lngRows
+        arrResult(lngRow, 1) = arrLHS(lngRow, 1)
+        arrResult(lngRow, 2) = arrLHS(lngRow, 2)
+        arrResult(lngRow, 3) = arrLHS(lngRow, 3)
+        arrResult(lngRow, 4) = arrLHS(lngRow, 4)
+        arrResult(lngRow, 5) = arrLHS(lngRow, 7)
+
+        strKey = BuildFundIsinKey(arrLHS(lngRow, 1), arrLHS(lngRow, 2))
+
+        If Len(strKey) = 0 Or Not dictLatestPayment.Exists(strKey) Then
+            arrResult(lngRow, 7) = "NOT FOUND"
+        Else
+            dblPaymentDate = CDbl(dictLatestPayment(strKey))
+            arrResult(lngRow, 6) = dblPaymentDate
+
+            blnHasLastCouponDate = TryGetExcelDateSerial( _
+                arrLHS(lngRow, 3), dblLastCouponDate)
+
+            If blnHasLastCouponDate Then
+                lngLastCouponDay = CLng(Int(dblLastCouponDate))
+                lngPaymentDay = CLng(Int(dblPaymentDate))
+
+                If lngLastCouponDay = lngPaymentDay Then
+                    arrResult(lngRow, 7) = "TRUE"
+                Else
+                    arrResult(lngRow, 7) = "FALSE"
+                End If
+
+                ' Positive value means Neolink Payment Date is later than LHS Last Coupon Date.
+                arrResult(lngRow, 8) = lngPaymentDay - lngLastCouponDay
+            Else
+                arrResult(lngRow, 7) = "NO LHS DATE"
+            End If
+        End If
     Next lngRow
 
     BuildOutputAllArray = arrResult
+
+ExitPoint:
+    Set dictLatestPayment = Nothing
+
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-09-08
+' Parameters:    arrNeolink - complete Input Neolink array including headers
+' Returns:       Object - Fund + ISIN -> latest valid INTR Payment Date
+' Description:   Uses only GL:Type code = INTR and keeps the greatest Payment Date.
+'-------------------------------------------------------------------------------
+Private Function BuildLatestNeolinkPaymentLookup(ByVal arrNeolink As Variant) As Object
+    Const METHOD_NAME As String = "BuildLatestNeolinkPaymentLookup"
+    Dim dictLatestPayment As Object
+    Dim dblPaymentDate As Double
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngRow As Long
+    Dim strKey As String
+    Dim strTypeCode As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set dictLatestPayment = CreateObject("Scripting.Dictionary")
+    dictLatestPayment.CompareMode = vbTextCompare
+
+    For lngRow = 2 To UBound(arrNeolink, 1)
+        strTypeCode = UCase$(Trim$(CStr(arrNeolink(lngRow, 3))))
+
+        If strTypeCode = "INTR" Then
+            strKey = BuildFundIsinKey(arrNeolink(lngRow, 1), arrNeolink(lngRow, 5))
+
+            If Len(strKey) > 0 Then
+                If TryGetExcelDateSerial(arrNeolink(lngRow, 7), dblPaymentDate) Then
+                    If dictLatestPayment.Exists(strKey) Then
+                        If dblPaymentDate > CDbl(dictLatestPayment(strKey)) Then
+                            dictLatestPayment(strKey) = dblPaymentDate
+                        End If
+                    Else
+                        dictLatestPayment.Add strKey, dblPaymentDate
+                    End If
+                End If
+            End If
+        End If
+    Next lngRow
+
+    Set BuildLatestNeolinkPaymentLookup = dictLatestPayment
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Set dictLatestPayment = Nothing
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-09-08
+' Parameters:    vFundCode - Fund Code; vIsin - External Value Code / CA:ISIN code
+' Returns:       String - normalized compound lookup key or empty string
+' Description:   Matches Fund + ISIN case-insensitively and ignores spaces.
+'-------------------------------------------------------------------------------
+Private Function BuildFundIsinKey(ByVal vFundCode As Variant, ByVal vIsin As Variant) As String
+    Const METHOD_NAME As String = "BuildFundIsinKey"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strFundCode As String
+    Dim strIsin As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If IsError(vFundCode) Or IsError(vIsin) Then GoTo ExitPoint
+
+    strFundCode = UCase$(Replace(Trim$(CStr(vFundCode)), " ", vbNullString))
+    strIsin = UCase$(Replace(Trim$(CStr(vIsin)), " ", vbNullString))
+
+    If Len(strFundCode) > 0 And Len(strIsin) > 0 Then
+        BuildFundIsinKey = strFundCode & LOOKUP_SEPARATOR & strIsin
+    End If
 
 ExitPoint:
     If errNumber <> 0 Then
@@ -136,6 +281,131 @@ ErrHandler:
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-09-08
+' Parameters:    vValue - candidate date; dblDateSerial - returned Excel date serial
+' Returns:       Boolean - True when the value can be used as a date
+' Description:   Accepts normalized Excel serials, Date values and DD/MM/YYYY text.
+'-------------------------------------------------------------------------------
+Private Function TryGetExcelDateSerial( _
+    ByVal vValue As Variant, ByRef dblDateSerial As Double) As Boolean
+
+    Const METHOD_NAME As String = "TryGetExcelDateSerial"
+    Dim arrParts As Variant
+    Dim datParsed As Date
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngDay As Long
+    Dim lngMonth As Long
+    Dim lngYear As Long
+    Dim strValue As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    dblDateSerial = 0
+
+    If IsError(vValue) Or IsEmpty(vValue) Then GoTo ExitPoint
+
+    If VarType(vValue) = vbDate Then
+        dblDateSerial = CDbl(CDate(vValue))
+        TryGetExcelDateSerial = True
+        GoTo ExitPoint
+    End If
+
+    If IsNumeric(vValue) Then
+        If CDbl(vValue) > 0 Then
+            dblDateSerial = CDbl(vValue)
+            TryGetExcelDateSerial = True
+        End If
+        GoTo ExitPoint
+    End If
+
+    strValue = Trim$(CStr(vValue))
+    If Len(strValue) = 0 Then GoTo ExitPoint
+
+    arrParts = Split(strValue, "/")
+
+    If UBound(arrParts) - LBound(arrParts) = 2 Then
+        If IsNumeric(arrParts(0)) And IsNumeric(arrParts(1)) And IsNumeric(arrParts(2)) Then
+            lngDay = CLng(arrParts(0))
+            lngMonth = CLng(arrParts(1))
+            lngYear = CLng(arrParts(2))
+
+            If lngDay >= 1 And lngDay <= 31 And lngMonth >= 1 And lngMonth <= 12 And _
+               lngYear >= 1900 And lngYear <= 9999 Then
+
+                datParsed = DateSerial(lngYear, lngMonth, lngDay)
+
+                If Day(datParsed) = lngDay And Month(datParsed) = lngMonth And _
+                   Year(datParsed) = lngYear Then
+                    dblDateSerial = CDbl(datParsed)
+                    TryGetExcelDateSerial = True
+                End If
+            End If
+        End If
+    End If
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-09-08
+' Parameters:    wksOutputAll - Output_All worksheet
+' Returns:       None
+' Description:   Colors TRUE matches green and FALSE matches red in column G.
+'-------------------------------------------------------------------------------
+Private Sub ApplyMatchFormatting(ByVal wksOutputAll As Excel.Worksheet)
+    Const METHOD_NAME As String = "ApplyMatchFormatting"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngLastRow As Long
+    Dim rngMatch As Excel.Range
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    lngLastRow = wksOutputAll.Cells(wksOutputAll.Rows.Count, 1).End(xlUp).Row
+    If lngLastRow < 2 Then GoTo ExitPoint
+
+    Set rngMatch = wksOutputAll.Range("G2:G" & CStr(lngLastRow))
+    rngMatch.FormatConditions.Delete
+
+    With rngMatch.FormatConditions.Add( _
+        Type:=xlExpression, Formula1:="=$G2=""TRUE""")
+        .Interior.Color = RGB(198, 239, 206)
+    End With
+
+    With rngMatch.FormatConditions.Add( _
+        Type:=xlExpression, Formula1:="=$G2=""FALSE""")
+        .Interior.Color = RGB(255, 199, 206)
+    End With
+
+ExitPoint:
+    Set rngMatch = Nothing
+
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
