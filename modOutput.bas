@@ -57,6 +57,7 @@ Public Function CreateOutputWorkbook( _
     wksOutputAll.Columns("I:I").NumberFormat = "0"
 
     Call ApplyMatchFormatting(wksOutputAll)
+    Call ApplyOutputAllDateHighlighting(wksOutputAll)
 
     wksLHS.Rows(1).Font.Bold = True
     wksNeolink.Rows(1).Font.Bold = True
@@ -65,6 +66,8 @@ Public Function CreateOutputWorkbook( _
     wksLHS.UsedRange.Columns.AutoFit
     wksNeolink.UsedRange.Columns.AutoFit
     wksOutputAll.UsedRange.Columns.AutoFit
+
+    Call FreezeTopRowOnAllSheets(wkbOutput)
 
     Set CreateOutputWorkbook = wkbOutput
     blnCompleted = True
@@ -488,6 +491,127 @@ Private Sub ApplyMatchFormatting(ByVal wksOutputAll As Excel.Worksheet)
 
 ExitPoint:
     Set rngMatch = Nothing
+
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-09-08
+' Parameters:    wksOutputAll - Output_All worksheet
+' Returns:       None
+' Description:   Visually distinguishes the two dates being compared. Uses very
+'                light fills so the output remains readable and print-friendly.
+'-------------------------------------------------------------------------------
+Private Sub ApplyOutputAllDateHighlighting(ByVal wksOutputAll As Excel.Worksheet)
+    Const METHOD_NAME As String = "ApplyOutputAllDateHighlighting"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngLastRow As Long
+    Dim rngLastCoupon As Excel.Range
+    Dim rngPaymentDate As Excel.Range
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    lngLastRow = wksOutputAll.Cells(wksOutputAll.Rows.Count, 1).End(xlUp).Row
+
+    With wksOutputAll.Range("F1")
+        .Font.Bold = True
+        .Interior.Color = RGB(255, 246, 214)
+    End With
+
+    With wksOutputAll.Range("G1")
+        .Font.Bold = True
+        .Interior.Color = RGB(221, 235, 247)
+    End With
+
+    If lngLastRow < 2 Then GoTo ExitPoint
+
+    Set rngLastCoupon = wksOutputAll.Range("F2:F" & CStr(lngLastRow))
+    Set rngPaymentDate = wksOutputAll.Range("G2:G" & CStr(lngLastRow))
+
+    rngLastCoupon.Interior.Color = RGB(255, 252, 240)
+    rngPaymentDate.Interior.Color = RGB(245, 250, 255)
+
+ExitPoint:
+    Set rngLastCoupon = Nothing
+    Set rngPaymentDate = Nothing
+
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-09-08
+' Parameters:    wkbTarget - output workbook
+' Returns:       None
+' Description:   Freezes row 1 on every worksheet. Excel exposes FreezePanes at
+'                window level, so each sheet must briefly become the active sheet.
+'-------------------------------------------------------------------------------
+Private Sub FreezeTopRowOnAllSheets(ByVal wkbTarget As Excel.Workbook)
+    Const METHOD_NAME As String = "FreezeTopRowOnAllSheets"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim wndTarget As Excel.Window
+    Dim wksOriginal As Excel.Worksheet
+    Dim wksTarget As Excel.Worksheet
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If wkbTarget Is Nothing Then
+        Err.Raise ERR_OUTPUT, METHOD_NAME, "Output workbook is not initialized."
+    End If
+
+    If wkbTarget.Windows.Count = 0 Then
+        Err.Raise ERR_OUTPUT, METHOD_NAME, "Output workbook does not have an Excel window."
+    End If
+
+    Set wndTarget = wkbTarget.Windows(1)
+
+    If TypeName(wkbTarget.ActiveSheet) = "Worksheet" Then
+        Set wksOriginal = wkbTarget.ActiveSheet
+    End If
+
+    wndTarget.Activate
+
+    For Each wksTarget In wkbTarget.Worksheets
+        ' FreezePanes is a Window property and applies to the active worksheet.
+        wksTarget.Activate
+
+        With wndTarget
+            .FreezePanes = False
+            .SplitColumn = 0
+            .SplitRow = 1
+            .FreezePanes = True
+        End With
+    Next wksTarget
+
+    If Not wksOriginal Is Nothing Then
+        wksOriginal.Activate
+    End If
+
+ExitPoint:
+    Set wksTarget = Nothing
+    Set wksOriginal = Nothing
+    Set wndTarget = Nothing
 
     If errNumber <> 0 Then
         Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
