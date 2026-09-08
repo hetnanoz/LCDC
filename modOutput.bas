@@ -51,10 +51,13 @@ Public Function CreateOutputWorkbook( _
     ' Force all known date columns to the required DD/MM/YYYY display.
     wksLHS.Columns("C:D").NumberFormat = "dd/mm/yyyy"
     wksLHS.Columns("G:G").NumberFormat = "dd/mm/yyyy"
-    wksLHS.Columns("J:J").NumberFormat = "dd/mm/yyyy"
+    wksLHS.Columns("H:H").NumberFormat = "dd/mm/yyyy hh:mm:ss"
+    wksLHS.Columns("K:K").NumberFormat = "dd/mm/yyyy"
     wksNeolink.Columns("F:G").NumberFormat = "dd/mm/yyyy"
-    wksOutputAll.Columns("D:G").NumberFormat = "dd/mm/yyyy"
-    wksOutputAll.Columns("I:I").NumberFormat = "0"
+    wksOutputAll.Columns("D:D").NumberFormat = "dd/mm/yyyy"
+    wksOutputAll.Columns("E:E").NumberFormat = "dd/mm/yyyy hh:mm:ss"
+    wksOutputAll.Columns("H:J").NumberFormat = "dd/mm/yyyy"
+    wksOutputAll.Columns("L:L").NumberFormat = "0"
 
     Call ApplyMatchFormatting(wksOutputAll)
     Call ApplyOutputAllDateHighlighting(wksOutputAll)
@@ -99,10 +102,10 @@ End Function
 ' Author:        Pawel Ligezka
 ' Creation date: 2026-09-08
 ' Parameters:    arrLHS - complete Input LHS array; arrNeolink - Neolink array
-' Returns:       Variant - nine-column Output_All array including headers
-' Description:   Keeps only LHS rows with a non-empty Last Coupon Date. Adds the
-'                Securities account and latest INTR Neolink Payment Date for each
-'                Fund + ISIN, then compares it with the LHS Last Coupon Date.
+' Returns:       Variant - twelve-column Output_All array including headers
+' Description:   Keeps only LHS rows with a non-empty Last Coupon Date. Adds LHS
+'                generation/coupon fields plus the latest INTR Neolink payment for
+'                each Fund + ISIN, then compares it with Last Coupon Date.
 '-------------------------------------------------------------------------------
 Private Function BuildOutputAllArray( _
     ByVal arrLHS As Variant, ByVal arrNeolink As Variant) As Variant
@@ -135,17 +138,20 @@ Private Function BuildOutputAllArray( _
         End If
     Next lngRow
 
-    ReDim arrResult(1 To lngRowsWithLastCouponDate + 1, 1 To 9)
+    ReDim arrResult(1 To lngRowsWithLastCouponDate + 1, 1 To 12)
 
     arrResult(1, 1) = arrLHS(1, 1)
     arrResult(1, 2) = "Securities account"
     arrResult(1, 3) = arrLHS(1, 2)
     arrResult(1, 4) = arrLHS(1, 7)
-    arrResult(1, 5) = arrLHS(1, 4)
-    arrResult(1, 6) = arrLHS(1, 3)
-    arrResult(1, 7) = "Neolink Payment Date"
-    arrResult(1, 8) = "Last Coupon Date Match"
-    arrResult(1, 9) = "Difference Days"
+    arrResult(1, 5) = arrLHS(1, 8)
+    arrResult(1, 6) = arrLHS(1, 9)
+    arrResult(1, 7) = arrLHS(1, 10)
+    arrResult(1, 8) = arrLHS(1, 4)
+    arrResult(1, 9) = arrLHS(1, 3)
+    arrResult(1, 10) = "Neolink Payment Date"
+    arrResult(1, 11) = "Last Coupon Date Match"
+    arrResult(1, 12) = "Difference Days"
 
     lngOutputRow = 1
 
@@ -156,19 +162,22 @@ Private Function BuildOutputAllArray( _
             arrResult(lngOutputRow, 1) = arrLHS(lngRow, 1)
             arrResult(lngOutputRow, 3) = arrLHS(lngRow, 2)
             arrResult(lngOutputRow, 4) = arrLHS(lngRow, 7)
-            arrResult(lngOutputRow, 5) = arrLHS(lngRow, 4)
-            arrResult(lngOutputRow, 6) = arrLHS(lngRow, 3)
+            arrResult(lngOutputRow, 5) = arrLHS(lngRow, 8)
+            arrResult(lngOutputRow, 6) = arrLHS(lngRow, 9)
+            arrResult(lngOutputRow, 7) = arrLHS(lngRow, 10)
+            arrResult(lngOutputRow, 8) = arrLHS(lngRow, 4)
+            arrResult(lngOutputRow, 9) = arrLHS(lngRow, 3)
 
             strKey = BuildFundIsinKey(arrLHS(lngRow, 1), arrLHS(lngRow, 2))
 
             If Len(strKey) = 0 Or Not dictLatestPayment.Exists(strKey) Then
-                arrResult(lngOutputRow, 8) = "NOT FOUND"
+                arrResult(lngOutputRow, 11) = "NOT FOUND"
             Else
                 arrLookupValue = dictLatestPayment(strKey)
                 dblPaymentDate = CDbl(arrLookupValue(0))
 
                 arrResult(lngOutputRow, 2) = CStr(arrLookupValue(1))
-                arrResult(lngOutputRow, 7) = dblPaymentDate
+                arrResult(lngOutputRow, 10) = dblPaymentDate
 
                 blnHasLastCouponDate = TryGetExcelDateSerial( _
                     arrLHS(lngRow, 3), dblLastCouponDate)
@@ -178,15 +187,15 @@ Private Function BuildOutputAllArray( _
                     lngPaymentDay = CLng(Int(dblPaymentDate))
 
                     If lngLastCouponDay = lngPaymentDay Then
-                        arrResult(lngOutputRow, 8) = "TRUE"
+                        arrResult(lngOutputRow, 11) = "TRUE"
                     Else
-                        arrResult(lngOutputRow, 8) = "FALSE"
+                        arrResult(lngOutputRow, 11) = "FALSE"
                     End If
 
                     ' Positive value means Neolink Payment Date is later than LHS Last Coupon Date.
-                    arrResult(lngOutputRow, 9) = lngPaymentDay - lngLastCouponDay
+                    arrResult(lngOutputRow, 12) = lngPaymentDay - lngLastCouponDay
                 Else
-                    arrResult(lngOutputRow, 8) = "NO LHS DATE"
+                    arrResult(lngOutputRow, 11) = "NO LHS DATE"
                 End If
             End If
         End If
@@ -462,7 +471,7 @@ End Function
 ' Creation date: 2026-09-08
 ' Parameters:    wksOutputAll - Output_All worksheet
 ' Returns:       None
-' Description:   Colors TRUE matches green and FALSE matches red in column H.
+' Description:   Colors TRUE matches green and FALSE matches red in column K.
 '-------------------------------------------------------------------------------
 Private Sub ApplyMatchFormatting(ByVal wksOutputAll As Excel.Worksheet)
     Const METHOD_NAME As String = "ApplyMatchFormatting"
@@ -476,16 +485,16 @@ Private Sub ApplyMatchFormatting(ByVal wksOutputAll As Excel.Worksheet)
     lngLastRow = wksOutputAll.Cells(wksOutputAll.Rows.Count, 1).End(xlUp).Row
     If lngLastRow < 2 Then GoTo ExitPoint
 
-    Set rngMatch = wksOutputAll.Range("H2:H" & CStr(lngLastRow))
+    Set rngMatch = wksOutputAll.Range("K2:K" & CStr(lngLastRow))
     rngMatch.FormatConditions.Delete
 
     With rngMatch.FormatConditions.Add( _
-        Type:=xlExpression, Formula1:="=$H2=""TRUE""")
+        Type:=xlExpression, Formula1:="=$K2=""TRUE""")
         .Interior.Color = RGB(198, 239, 206)
     End With
 
     With rngMatch.FormatConditions.Add( _
-        Type:=xlExpression, Formula1:="=$H2=""FALSE""")
+        Type:=xlExpression, Formula1:="=$K2=""FALSE""")
         .Interior.Color = RGB(255, 199, 206)
     End With
 
@@ -524,20 +533,20 @@ Private Sub ApplyOutputAllDateHighlighting(ByVal wksOutputAll As Excel.Worksheet
 
     lngLastRow = wksOutputAll.Cells(wksOutputAll.Rows.Count, 1).End(xlUp).Row
 
-    With wksOutputAll.Range("F1")
+    With wksOutputAll.Range("I1")
         .Font.Bold = True
         .Interior.Color = RGB(255, 246, 214)
     End With
 
-    With wksOutputAll.Range("G1")
+    With wksOutputAll.Range("J1")
         .Font.Bold = True
         .Interior.Color = RGB(221, 235, 247)
     End With
 
     If lngLastRow < 2 Then GoTo ExitPoint
 
-    Set rngLastCoupon = wksOutputAll.Range("F2:F" & CStr(lngLastRow))
-    Set rngPaymentDate = wksOutputAll.Range("G2:G" & CStr(lngLastRow))
+    Set rngLastCoupon = wksOutputAll.Range("I2:I" & CStr(lngLastRow))
+    Set rngPaymentDate = wksOutputAll.Range("J2:J" & CStr(lngLastRow))
 
     rngLastCoupon.Interior.Color = RGB(255, 252, 240)
     rngPaymentDate.Interior.Color = RGB(245, 250, 255)
