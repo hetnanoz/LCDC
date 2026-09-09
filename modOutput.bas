@@ -590,9 +590,18 @@ End Sub
 '-------------------------------------------------------------------------------
 Private Sub ApplyValueDateMismatchFormatting(ByVal wksOutputAll As Excel.Worksheet)
     Const METHOD_NAME As String = "ApplyValueDateMismatchFormatting"
+    Dim arrPaymentDate As Variant
+    Dim arrValueDate As Variant
+    Dim blnMismatch As Boolean
+    Dim dblPaymentDate As Double
+    Dim dblValueDate As Double
     Dim errDescription As String
     Dim errNumber As Long
+    Dim lngIndex As Long
     Dim lngLastRow As Long
+    Dim lngRunStart As Long
+    Dim rngMismatch As Excel.Range
+    Dim rngRun As Excel.Range
     Dim rngValueDate As Excel.Range
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
@@ -601,15 +610,54 @@ Private Sub ApplyValueDateMismatchFormatting(ByVal wksOutputAll As Excel.Workshe
     If lngLastRow < 2 Then GoTo ExitPoint
 
     Set rngValueDate = wksOutputAll.Range("H2:H" & CStr(lngLastRow))
-    rngValueDate.FormatConditions.Delete
+    arrValueDate = rngValueDate.Value2
+    arrPaymentDate = wksOutputAll.Range("K2:K" & CStr(lngLastRow)).Value2
 
-    With rngValueDate.FormatConditions.Add( _
-        Type:=xlExpression, _
-        Formula1:="=AND(ISNUMBER($H2),ISNUMBER($K2),INT($H2)<>INT($K2))")
-        .Interior.Color = RGB(255, 230, 230)
-    End With
+    ' Remove only formatting previously applied by this routine.
+    rngValueDate.FormatConditions.Delete
+    rngValueDate.Interior.Pattern = xlNone
+
+    ' Compare the values in VBA instead of using a conditional-format formula.
+    ' This avoids locale-dependent Formula1 parsing that can raise VBA Error 5.
+    For lngIndex = 1 To UBound(arrValueDate, 1)
+        blnMismatch = False
+
+        If TryGetExcelDateSerial(arrValueDate(lngIndex, 1), dblValueDate) Then
+            If TryGetExcelDateSerial(arrPaymentDate(lngIndex, 1), dblPaymentDate) Then
+                blnMismatch = (CLng(Int(dblValueDate)) <> CLng(Int(dblPaymentDate)))
+            End If
+        End If
+
+        If blnMismatch Then
+            If lngRunStart = 0 Then lngRunStart = lngIndex
+        ElseIf lngRunStart > 0 Then
+            Set rngRun = rngValueDate.Cells(lngRunStart, 1).Resize(lngIndex - lngRunStart, 1)
+            If rngMismatch Is Nothing Then
+                Set rngMismatch = rngRun
+            Else
+                Set rngMismatch = Application.Union(rngMismatch, rngRun)
+            End If
+            lngRunStart = 0
+        End If
+    Next lngIndex
+
+    If lngRunStart > 0 Then
+        Set rngRun = rngValueDate.Cells(lngRunStart, 1).Resize( _
+            UBound(arrValueDate, 1) - lngRunStart + 1, 1)
+        If rngMismatch Is Nothing Then
+            Set rngMismatch = rngRun
+        Else
+            Set rngMismatch = Application.Union(rngMismatch, rngRun)
+        End If
+    End If
+
+    If Not rngMismatch Is Nothing Then
+        rngMismatch.Interior.Color = RGB(255, 230, 230)
+    End If
 
 ExitPoint:
+    Set rngRun = Nothing
+    Set rngMismatch = Nothing
     Set rngValueDate = Nothing
 
     If errNumber <> 0 Then
