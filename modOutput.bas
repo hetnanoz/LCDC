@@ -4,6 +4,7 @@ Private Const CLASS_NAME As String = "modOutput"
 Private Const OUTPUT_BASE_NAME As String = "Last_Coupon_Date_Checker_"
 Private Const ERR_OUTPUT As Long = vbObjectError + 6600
 Private Const LOOKUP_SEPARATOR As String = "|"
+Private Const PAYMENT_PREVIOUS_WINDOW_DAYS As Long = 10
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
@@ -58,11 +59,13 @@ Public Function CreateOutputWorkbook( _
     wksOutputAll.Columns("E:E").NumberFormat = "dd/mm/yyyy"
     wksOutputAll.Columns("H:K").NumberFormat = "dd/mm/yyyy"
     wksOutputAll.Columns("M:M").NumberFormat = "0"
+    wksOutputAll.Columns("O:O").NumberFormat = "dd/mm/yyyy"
 
     Call ApplyMatchFormatting(wksOutputAll)
     Call ApplyOutputAllDateHighlighting(wksOutputAll)
     Call ApplyWeekendDateHighlighting(wksOutputAll)
     Call ApplyValueDateMismatchFormatting(wksOutputAll)
+    Call ApplyPreviousPaymentSelectionFormatting(wksOutputAll)
     Call ApplyMappingTooltips(wksOutputAll)
 
     Call FormatWorksheetLayout(wksLHS)
@@ -101,9 +104,9 @@ End Function
 ' Author:        Pawel Ligezka
 ' Creation date: 2026-09-08
 ' Parameters:    arrLHS - complete Input LHS array; arrNeolink - Neolink array
-' Returns:       Variant - thirteen-column Output_All array including headers
+' Returns:       Variant - fifteen-column Output_All array including headers
 ' Description:   Keeps only LHS rows with a non-empty Last Coupon Date. Adds LHS
-'                generation/coupon fields plus Value Date and latest INTR Payment
+'                generation/coupon fields plus Value Date and selected INTR Payment
 '                Date from the same Neolink row, then compares Last Coupon Date.
 '-------------------------------------------------------------------------------
 Private Function BuildOutputAllArray( _
@@ -113,7 +116,7 @@ Private Function BuildOutputAllArray( _
     Dim arrLookupValue As Variant
     Dim arrResult() As Variant
     Dim blnHasLastCouponDate As Boolean
-    Dim dictLatestPayment As Object
+    Dim dictPreferredPayment As Object
     Dim dblLastCouponDate As Double
     Dim dblPaymentDate As Double
     Dim errDescription As String
@@ -128,7 +131,7 @@ Private Function BuildOutputAllArray( _
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    Set dictLatestPayment = BuildLatestNeolinkPaymentLookup(arrNeolink)
+    Set dictPreferredPayment = BuildPreferredNeolinkPaymentLookup(arrNeolink)
     lngRows = UBound(arrLHS, 1)
 
     For lngRow = 2 To lngRows
@@ -137,7 +140,7 @@ Private Function BuildOutputAllArray( _
         End If
     Next lngRow
 
-    ReDim arrResult(1 To lngRowsWithLastCouponDate + 1, 1 To 13)
+    ReDim arrResult(1 To lngRowsWithLastCouponDate + 1, 1 To 15)
 
     arrResult(1, 1) = arrLHS(1, 1)
     arrResult(1, 2) = "Securities account"
@@ -152,6 +155,8 @@ Private Function BuildOutputAllArray( _
     arrResult(1, 11) = "Neolink Payment Date"
     arrResult(1, 12) = "Last Coupon Date Match"
     arrResult(1, 13) = "Difference Days"
+    arrResult(1, 14) = "Payment Date Selection"
+    arrResult(1, 15) = "Latest Neolink Payment Date"
 
     lngOutputRow = 1
 
@@ -170,10 +175,10 @@ Private Function BuildOutputAllArray( _
 
             strKey = BuildFundIsinKey(arrLHS(lngRow, 1), arrLHS(lngRow, 2))
 
-            If Len(strKey) = 0 Or Not dictLatestPayment.Exists(strKey) Then
+            If Len(strKey) = 0 Or Not dictPreferredPayment.Exists(strKey) Then
                 arrResult(lngOutputRow, 12) = "NOT FOUND"
             Else
-                arrLookupValue = dictLatestPayment(strKey)
+                arrLookupValue = dictPreferredPayment(strKey)
                 dblPaymentDate = CDbl(arrLookupValue(0))
 
                 arrResult(lngOutputRow, 2) = CStr(arrLookupValue(1))
@@ -181,6 +186,11 @@ Private Function BuildOutputAllArray( _
                     arrResult(lngOutputRow, 8) = CDbl(arrLookupValue(2))
                 End If
                 arrResult(lngOutputRow, 11) = dblPaymentDate
+
+                If CBool(arrLookupValue(3)) Then
+                    arrResult(lngOutputRow, 14) = "PREVIOUS DATE USED"
+                    arrResult(lngOutputRow, 15) = CDbl(arrLookupValue(4))
+                End If
 
                 blnHasLastCouponDate = TryGetExcelDateSerial( _
                     arrLHS(lngRow, 3), dblLastCouponDate)
@@ -207,7 +217,7 @@ Private Function BuildOutputAllArray( _
     BuildOutputAllArray = arrResult
 
 ExitPoint:
-    Set dictLatestPayment = Nothing
+    Set dictPreferredPayment = Nothing
 
     If errNumber <> 0 Then
         Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
@@ -223,30 +233,38 @@ End Function
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
-' Creation date: 2026-09-08
+' Creation date: 2026-09-10
 ' Parameters:    arrNeolink - complete Input Neolink array including headers
-' Returns:       Object - Fund + ISIN -> Array(Payment Date, account, Value Date)
-' Description:   Uses only GL:Type code = INTR and keeps the row with the greatest
-'                Payment Date. Account and Value Date come from that same row.
+' Returns:       Object - Fund + ISIN -> Array(selected Payment Date, account, Value Date,
+'                previous-date-used flag, original latest Payment Date)
+' Description:   Uses only GL:Type code = INTR. Tracks the latest and immediately
+'                preceding distinct Payment Date for each Fund + ISIN. If the
+'                preceding date is within 10 calendar days before the latest date,
+'                the preceding date is selected; otherwise the latest date is used.
+'                Account and Value Date always come from the selected Neolink row.
 '-------------------------------------------------------------------------------
-Private Function BuildLatestNeolinkPaymentLookup(ByVal arrNeolink As Variant) As Object
-    Const METHOD_NAME As String = "BuildLatestNeolinkPaymentLookup"
+Private Function BuildPreferredNeolinkPaymentLookup(ByVal arrNeolink As Variant) As Object
+    Const METHOD_NAME As String = "BuildPreferredNeolinkPaymentLookup"
     Dim arrExisting As Variant
+    Dim arrKeys As Variant
     Dim blnHasValueDate As Boolean
-    Dim dictLatestPayment As Object
+    Dim dictPayment As Object
     Dim dblPaymentDate As Double
     Dim dblValueDate As Double
     Dim errDescription As String
     Dim errNumber As Long
+    Dim lngLatestDay As Long
+    Dim lngPreviousDay As Long
     Dim lngRow As Long
+    Dim lngKeyIndex As Long
     Dim strAccount As String
     Dim strKey As String
     Dim strTypeCode As String
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    Set dictLatestPayment = CreateObject("Scripting.Dictionary")
-    dictLatestPayment.CompareMode = vbTextCompare
+    Set dictPayment = CreateObject("Scripting.Dictionary")
+    dictPayment.CompareMode = vbTextCompare
 
     For lngRow = 2 To UBound(arrNeolink, 1)
         strTypeCode = UCase$(Trim$(CStr(arrNeolink(lngRow, 3))))
@@ -256,33 +274,77 @@ Private Function BuildLatestNeolinkPaymentLookup(ByVal arrNeolink As Variant) As
 
             If Len(strKey) > 0 Then
                 If TryGetExcelDateSerial(arrNeolink(lngRow, 7), dblPaymentDate) Then
+                    ' Compare Payment Dates as calendar dates, not date-time values.
+                    dblPaymentDate = CDbl(CLng(Int(dblPaymentDate)))
                     strAccount = GetLastElevenAccountCharacters(arrNeolink(lngRow, 2))
                     blnHasValueDate = TryGetExcelDateSerial( _
                         arrNeolink(lngRow, 6), dblValueDate)
 
-                    If Not blnHasValueDate Then dblValueDate = 0
+                    If blnHasValueDate Then
+                        dblValueDate = CDbl(CLng(Int(dblValueDate)))
+                    Else
+                        dblValueDate = 0
+                    End If
 
-                    If dictLatestPayment.Exists(strKey) Then
-                        arrExisting = dictLatestPayment(strKey)
+                    If dictPayment.Exists(strKey) Then
+                        arrExisting = dictPayment(strKey)
 
                         If dblPaymentDate > CDbl(arrExisting(0)) Then
-                            dictLatestPayment(strKey) = _
-                                Array(dblPaymentDate, strAccount, dblValueDate)
+                            ' The former latest date becomes the immediately preceding date.
+                            arrExisting(3) = arrExisting(0)
+                            arrExisting(4) = arrExisting(1)
+                            arrExisting(5) = arrExisting(2)
+                            arrExisting(0) = dblPaymentDate
+                            arrExisting(1) = strAccount
+                            arrExisting(2) = dblValueDate
+                            dictPayment(strKey) = arrExisting
+                        ElseIf dblPaymentDate < CDbl(arrExisting(0)) Then
+                            If CDbl(arrExisting(3)) = 0 Or _
+                               dblPaymentDate > CDbl(arrExisting(3)) Then
+
+                                arrExisting(3) = dblPaymentDate
+                                arrExisting(4) = strAccount
+                                arrExisting(5) = dblValueDate
+                                dictPayment(strKey) = arrExisting
+                            End If
                         End If
                     Else
-                        dictLatestPayment.Add strKey, _
-                            Array(dblPaymentDate, strAccount, dblValueDate)
+                        ' 0-2 = latest row; 3-5 = immediately preceding distinct row.
+                        dictPayment.Add strKey, _
+                            Array(dblPaymentDate, strAccount, dblValueDate, 0#, vbNullString, 0#)
                     End If
                 End If
             End If
         End If
     Next lngRow
 
-    Set BuildLatestNeolinkPaymentLookup = dictLatestPayment
+    ' Reduce the internal six-value record to the values expected by Output_All.
+    If dictPayment.Count > 0 Then
+        arrKeys = dictPayment.Keys
+
+        For lngKeyIndex = LBound(arrKeys) To UBound(arrKeys)
+            strKey = CStr(arrKeys(lngKeyIndex))
+            arrExisting = dictPayment(strKey)
+            lngLatestDay = CLng(arrExisting(0))
+            lngPreviousDay = CLng(arrExisting(3))
+
+            If lngPreviousDay > 0 And _
+               lngLatestDay - lngPreviousDay <= PAYMENT_PREVIOUS_WINDOW_DAYS Then
+
+                dictPayment(strKey) = _
+                    Array(arrExisting(3), arrExisting(4), arrExisting(5), True, arrExisting(0))
+            Else
+                dictPayment(strKey) = _
+                    Array(arrExisting(0), arrExisting(1), arrExisting(2), False, arrExisting(0))
+            End If
+        Next lngKeyIndex
+    End If
+
+    Set BuildPreferredNeolinkPaymentLookup = dictPayment
 
 ExitPoint:
     If errNumber <> 0 Then
-        Set dictLatestPayment = Nothing
+        Set dictPayment = Nothing
         Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
     End If
     Exit Function
@@ -657,6 +719,96 @@ ExitPoint:
     Set rngRun = Nothing
     Set rngMismatch = Nothing
     Set rngValueDate = Nothing
+
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+ '-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-09-10
+' Parameters:    wksOutputAll - Output_All worksheet
+' Returns:       None
+' Description:   Marks Fund + ISIN cases where the 10-day diagnostic rule selected
+'                the immediately preceding Payment Date instead of the latest one.
+'                The ISIN and diagnostic cells receive a light yellow fill so the
+'                hypothesis can be reviewed easily without changing business logic.
+'-------------------------------------------------------------------------------
+Private Sub ApplyPreviousPaymentSelectionFormatting(ByVal wksOutputAll As Excel.Worksheet)
+    Const METHOD_NAME As String = "ApplyPreviousPaymentSelectionFormatting"
+    Dim arrSelection As Variant
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngIndex As Long
+    Dim lngLastRow As Long
+    Dim lngRunStart As Long
+    Dim rngFlagged As Excel.Range
+    Dim rngRun As Excel.Range
+    Dim rngSelection As Excel.Range
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    lngLastRow = wksOutputAll.Cells(wksOutputAll.Rows.Count, 1).End(xlUp).Row
+    If lngLastRow < 2 Then GoTo ExitPoint
+
+    Set rngSelection = wksOutputAll.Range("N2:N" & CStr(lngLastRow))
+    arrSelection = rngSelection.Value2
+
+    For lngIndex = 1 To UBound(arrSelection, 1)
+        If UCase$(Trim$(CStr(arrSelection(lngIndex, 1)))) = "PREVIOUS DATE USED" Then
+            If lngRunStart = 0 Then lngRunStart = lngIndex
+        ElseIf lngRunStart > 0 Then
+            Set rngRun = wksOutputAll.Range( _
+                "C" & CStr(lngRunStart + 1) & ":C" & CStr(lngIndex))
+            If rngFlagged Is Nothing Then
+                Set rngFlagged = rngRun
+            Else
+                Set rngFlagged = Application.Union(rngFlagged, rngRun)
+            End If
+            lngRunStart = 0
+        End If
+    Next lngIndex
+
+    If lngRunStart > 0 Then
+        Set rngRun = wksOutputAll.Range( _
+            "C" & CStr(lngRunStart + 1) & ":C" & CStr(lngLastRow))
+        If rngFlagged Is Nothing Then
+            Set rngFlagged = rngRun
+        Else
+            Set rngFlagged = Application.Union(rngFlagged, rngRun)
+        End If
+    End If
+
+    If Not rngFlagged Is Nothing Then
+        rngFlagged.Interior.Color = RGB(255, 242, 204)
+    End If
+
+    With wksOutputAll.Range("N1:O1")
+        .Font.Bold = True
+        .Interior.Color = RGB(255, 242, 204)
+    End With
+
+    For lngIndex = 2 To lngLastRow
+        If UCase$(Trim$(CStr(wksOutputAll.Cells(lngIndex, 14).Value2))) = _
+           "PREVIOUS DATE USED" Then
+            wksOutputAll.Range( _
+                wksOutputAll.Cells(lngIndex, 14), _
+                wksOutputAll.Cells(lngIndex, 15)).Interior.Color = RGB(255, 242, 204)
+        End If
+    Next lngIndex
+
+ExitPoint:
+    Set rngSelection = Nothing
+    Set rngRun = Nothing
+    Set rngFlagged = Nothing
 
     If errNumber <> 0 Then
         Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
