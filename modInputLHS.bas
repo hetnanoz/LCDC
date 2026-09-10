@@ -78,8 +78,6 @@ Public Function LoadLHSInput( _
             If lngDataRows = 1 Then
                 If IsLHSDateOutputColumn(lngOutputColumn) Then
                     arrOutput(2, lngOutputColumn) = NormalizeLHSDateValue(arrColumn)
-                ElseIf IsLHSDateTimeOutputColumn(lngOutputColumn) Then
-                    arrOutput(2, lngOutputColumn) = NormalizeLHSDateTimeValue(arrColumn)
                 Else
                     arrOutput(2, lngOutputColumn) = arrColumn
                 End If
@@ -88,9 +86,6 @@ Public Function LoadLHSInput( _
                     If IsLHSDateOutputColumn(lngOutputColumn) Then
                         arrOutput(lngRow + 1, lngOutputColumn) = _
                             NormalizeLHSDateValue(arrColumn(lngRow, 1))
-                    ElseIf IsLHSDateTimeOutputColumn(lngOutputColumn) Then
-                        arrOutput(lngRow + 1, lngOutputColumn) = _
-                            NormalizeLHSDateTimeValue(arrColumn(lngRow, 1))
                     Else
                         arrOutput(lngRow + 1, lngOutputColumn) = arrColumn(lngRow, 1)
                     End If
@@ -139,7 +134,7 @@ Private Function IsLHSDateOutputColumn(ByVal lngOutputColumn As Long) As Boolean
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     Select Case lngOutputColumn
-        Case 3, 4, 7, 11
+        Case 3, 4, 7, 8, 11
             IsLHSDateOutputColumn = True
         Case Else
             IsLHSDateOutputColumn = False
@@ -163,172 +158,9 @@ End Function
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
 ' Creation date: 2026-09-08
-' Parameters:    lngOutputColumn - column position in the Input LHS output array
-' Returns:       Boolean - True for the Generation Date and Time column
-' Description:   Identifies the LHS date-time column that must retain its time.
-'-------------------------------------------------------------------------------
-Private Function IsLHSDateTimeOutputColumn(ByVal lngOutputColumn As Long) As Boolean
-    Const METHOD_NAME As String = "IsLHSDateTimeOutputColumn"
-    Dim errDescription As String
-    Dim errNumber As Long
-
-    If Not DEV_MODE Then On Error GoTo ErrHandler
-
-    IsLHSDateTimeOutputColumn = (lngOutputColumn = 8)
-
-ExitPoint:
-    If errNumber <> 0 Then
-        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
-    End If
-    Exit Function
-
-ErrHandler:
-    errNumber = VBA.Err.Number
-    errDescription = VBA.Err.Description
-    Call ErrorManager.addError( _
-        CLASS_NAME, METHOD_NAME, errNumber, errDescription, _
-        "lngOutputColumn", lngOutputColumn)
-    GoTo ExitPoint
-End Function
-
-'-------------------------------------------------------------------------------
-' Author:        Pawel Ligezka
-' Creation date: 2026-09-08
-' Parameters:    vValue - source LHS Generation Date and Time value
-' Returns:       Variant - Excel date-time serial or unchanged source value
-' Description:   Parses DD/MM/YYYY with optional HH:MM[:SS] without locale CDate.
-'-------------------------------------------------------------------------------
-Private Function NormalizeLHSDateTimeValue(ByVal vValue As Variant) As Variant
-    Const METHOD_NAME As String = "NormalizeLHSDateTimeValue"
-    Dim arrDateParts As Variant
-    Dim arrTimeParts As Variant
-    Dim datParsed As Date
-    Dim errDescription As String
-    Dim errNumber As Long
-    Dim lngDay As Long
-    Dim lngHour As Long
-    Dim lngMinute As Long
-    Dim lngMonth As Long
-    Dim lngSecond As Long
-    Dim lngYear As Long
-    Dim strDatePart As String
-    Dim strTimePart As String
-    Dim strValue As String
-
-    If Not DEV_MODE Then On Error GoTo ErrHandler
-
-    If IsError(vValue) Or IsEmpty(vValue) Then
-        NormalizeLHSDateTimeValue = vValue
-        GoTo ExitPoint
-    End If
-
-    If VarType(vValue) = vbDate Then
-        NormalizeLHSDateTimeValue = CDbl(CDate(vValue))
-        GoTo ExitPoint
-    End If
-
-    If IsNumeric(vValue) Then
-        NormalizeLHSDateTimeValue = CDbl(vValue)
-        GoTo ExitPoint
-    End If
-
-    strValue = Trim$(CStr(vValue))
-    If Len(strValue) = 0 Then
-        NormalizeLHSDateTimeValue = vbNullString
-        GoTo ExitPoint
-    End If
-
-    If Len(strValue) < 10 Then
-        NormalizeLHSDateTimeValue = vValue
-        GoTo ExitPoint
-    End If
-
-    strDatePart = Left$(strValue, 10)
-    strTimePart = Trim$(Mid$(strValue, 11))
-    arrDateParts = Split(strDatePart, "/")
-
-    If UBound(arrDateParts) - LBound(arrDateParts) <> 2 Then
-        NormalizeLHSDateTimeValue = vValue
-        GoTo ExitPoint
-    End If
-
-    If Not IsNumeric(arrDateParts(0)) Or Not IsNumeric(arrDateParts(1)) Or _
-       Not IsNumeric(arrDateParts(2)) Then
-        NormalizeLHSDateTimeValue = vValue
-        GoTo ExitPoint
-    End If
-
-    lngDay = CLng(arrDateParts(0))
-    lngMonth = CLng(arrDateParts(1))
-    lngYear = CLng(arrDateParts(2))
-
-    If lngDay < 1 Or lngDay > 31 Or lngMonth < 1 Or lngMonth > 12 Or _
-       lngYear < 1900 Or lngYear > 9999 Then
-        NormalizeLHSDateTimeValue = vValue
-        GoTo ExitPoint
-    End If
-
-    datParsed = DateSerial(lngYear, lngMonth, lngDay)
-    If Day(datParsed) <> lngDay Or Month(datParsed) <> lngMonth Or _
-       Year(datParsed) <> lngYear Then
-        NormalizeLHSDateTimeValue = vValue
-        GoTo ExitPoint
-    End If
-
-    If Len(strTimePart) > 0 Then
-        arrTimeParts = Split(strTimePart, ":")
-
-        If UBound(arrTimeParts) < 1 Or UBound(arrTimeParts) > 2 Then
-            NormalizeLHSDateTimeValue = vValue
-            GoTo ExitPoint
-        End If
-
-        If Not IsNumeric(arrTimeParts(0)) Or Not IsNumeric(arrTimeParts(1)) Then
-            NormalizeLHSDateTimeValue = vValue
-            GoTo ExitPoint
-        End If
-
-        lngHour = CLng(arrTimeParts(0))
-        lngMinute = CLng(arrTimeParts(1))
-
-        If UBound(arrTimeParts) = 2 Then
-            If Not IsNumeric(arrTimeParts(2)) Then
-                NormalizeLHSDateTimeValue = vValue
-                GoTo ExitPoint
-            End If
-            lngSecond = CLng(arrTimeParts(2))
-        End If
-
-        If lngHour < 0 Or lngHour > 23 Or lngMinute < 0 Or lngMinute > 59 Or _
-           lngSecond < 0 Or lngSecond > 59 Then
-            NormalizeLHSDateTimeValue = vValue
-            GoTo ExitPoint
-        End If
-
-        datParsed = datParsed + TimeSerial(lngHour, lngMinute, lngSecond)
-    End If
-
-    NormalizeLHSDateTimeValue = CDbl(datParsed)
-
-ExitPoint:
-    If errNumber <> 0 Then
-        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
-    End If
-    Exit Function
-
-ErrHandler:
-    errNumber = VBA.Err.Number
-    errDescription = VBA.Err.Description
-    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
-    GoTo ExitPoint
-End Function
-
-'-------------------------------------------------------------------------------
-' Author:        Pawel Ligezka
-' Creation date: 2026-09-08
 ' Parameters:    vValue - source LHS date value
 ' Returns:       Variant - Excel date serial or unchanged non-date value
-' Description:   Parses explicit DD/MM/YYYY text without locale-dependent CDate.
+' Description:   Parses DD/MM/YYYY and strips any time component from date-only fields.
 '-------------------------------------------------------------------------------
 Private Function NormalizeLHSDateValue(ByVal vValue As Variant) As Variant
     Const METHOD_NAME As String = "NormalizeLHSDateValue"
@@ -349,16 +181,17 @@ Private Function NormalizeLHSDateValue(ByVal vValue As Variant) As Variant
     End If
 
     If VarType(vValue) = vbDate Then
-        NormalizeLHSDateValue = CDbl(CDate(vValue))
+        NormalizeLHSDateValue = Int(CDbl(CDate(vValue)))
         GoTo ExitPoint
     End If
 
     If IsNumeric(vValue) Then
-        NormalizeLHSDateValue = CDbl(vValue)
+        NormalizeLHSDateValue = Int(CDbl(vValue))
         GoTo ExitPoint
     End If
 
     strValue = Trim$(CStr(vValue))
+    If Len(strValue) >= 10 Then strValue = Left$(strValue, 10)
     If Len(strValue) = 0 Then
         NormalizeLHSDateValue = vbNullString
         GoTo ExitPoint
@@ -451,3 +284,4 @@ ErrHandler:
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Sub
+
