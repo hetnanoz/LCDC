@@ -51,25 +51,23 @@ Public Function CreateOutputWorkbook( _
     ' Force all known date columns to the required DD/MM/YYYY display.
     wksLHS.Columns("C:D").NumberFormat = "dd/mm/yyyy"
     wksLHS.Columns("G:G").NumberFormat = "dd/mm/yyyy"
-    wksLHS.Columns("H:H").NumberFormat = "dd/mm/yyyy hh:mm:ss"
+    wksLHS.Columns("H:H").NumberFormat = "dd/mm/yyyy"
     wksLHS.Columns("K:K").NumberFormat = "dd/mm/yyyy"
     wksNeolink.Columns("F:G").NumberFormat = "dd/mm/yyyy"
     wksOutputAll.Columns("D:D").NumberFormat = "dd/mm/yyyy"
-    wksOutputAll.Columns("E:E").NumberFormat = "dd/mm/yyyy hh:mm:ss"
+    wksOutputAll.Columns("E:E").NumberFormat = "dd/mm/yyyy"
     wksOutputAll.Columns("H:K").NumberFormat = "dd/mm/yyyy"
     wksOutputAll.Columns("M:M").NumberFormat = "0"
 
     Call ApplyMatchFormatting(wksOutputAll)
     Call ApplyOutputAllDateHighlighting(wksOutputAll)
+    Call ApplyWeekendDateHighlighting(wksOutputAll)
     Call ApplyValueDateMismatchFormatting(wksOutputAll)
+    Call ApplyMappingTooltips(wksOutputAll)
 
-    wksLHS.Rows(1).Font.Bold = True
-    wksNeolink.Rows(1).Font.Bold = True
-    wksOutputAll.Rows(1).Font.Bold = True
-
-    wksLHS.UsedRange.Columns.AutoFit
-    wksNeolink.UsedRange.Columns.AutoFit
-    wksOutputAll.UsedRange.Columns.AutoFit
+    Call FormatWorksheetLayout(wksLHS)
+    Call FormatWorksheetLayout(wksNeolink)
+    Call FormatWorksheetLayout(wksOutputAll)
 
     Call FreezeTopRowOnAllSheets(wkbOutput)
 
@@ -669,6 +667,190 @@ ErrHandler:
     errNumber = VBA.Err.Number
     errDescription = VBA.Err.Description
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+ '-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-09-10
+' Parameters:    wksOutputAll - Output_All worksheet
+' Returns:       None
+' Description:   Adds lightweight Data Validation input-message tooltips to the
+'                coupon frequency and bond calculation method columns. One rule
+'                per column keeps the runtime impact negligible even for large files.
+'-------------------------------------------------------------------------------
+Private Sub ApplyMappingTooltips(ByVal wksOutputAll As Excel.Worksheet)
+    Const METHOD_NAME As String = "ApplyMappingTooltips"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngLastRow As Long
+    Dim rngBondCalc As Excel.Range
+    Dim rngCouponFrequency As Excel.Range
+    Dim strBondTooltip As String
+    Dim strCouponTooltip As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    lngLastRow = wksOutputAll.Cells(wksOutputAll.Rows.Count, 1).End(xlUp).Row
+    If lngLastRow < 2 Then GoTo ExitPoint
+
+    strCouponTooltip = _
+        "1 - End of Month" & vbLf & _
+        "2 - End of Quarter" & vbLf & _
+        "3 - End of half-year" & vbLf & _
+        "4 - End of Year" & vbLf & _
+        "5 - Monthly" & vbLf & _
+        "6 - Quarterly" & vbLf & _
+        "7 - Half-year" & vbLf & _
+        "8 - Year" & vbLf & _
+        "9 - Maturity"
+
+    strBondTooltip = _
+        "1 - 365-6/365" & vbLf & _
+        "2 - 365-6/360" & vbLf & _
+        "3 - 360/360" & vbLf & _
+        "4 - 360/365" & vbLf & _
+        "5 - 365-6/365-6" & vbLf & _
+        "6 - 365-6/365-6 = Civil" & vbLf & _
+        "7 - 360/360 US" & vbLf & _
+        "8 - Actual/364" & vbLf & _
+        "9 - Actual/252"
+
+    Set rngCouponFrequency = wksOutputAll.Range("F2:F" & CStr(lngLastRow))
+    Set rngBondCalc = wksOutputAll.Range("G2:G" & CStr(lngLastRow))
+
+    With rngCouponFrequency.Validation
+        .Add Type:=xlValidateInputOnly
+        .IgnoreBlank = True
+        .InputTitle = "Coupon Frequency"
+        .InputMessage = strCouponTooltip
+        .ShowInput = True
+        .ShowError = False
+    End With
+
+    With rngBondCalc.Validation
+        .Add Type:=xlValidateInputOnly
+        .IgnoreBlank = True
+        .InputTitle = "Interest calculation type"
+        .InputMessage = strBondTooltip
+        .ShowInput = True
+        .ShowError = False
+    End With
+
+ExitPoint:
+    Set rngCouponFrequency = Nothing
+    Set rngBondCalc = Nothing
+
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+ '-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-09-10
+' Parameters:    wksOutputAll - Output_All worksheet
+' Returns:       None
+' Description:   Highlights weekend dates in Next Coupon Date, Last Coupon Date
+'                and Neolink Payment Date. Saturday and Sunday use distinct fills.
+'-------------------------------------------------------------------------------
+Private Sub ApplyWeekendDateHighlighting(ByVal wksOutputAll As Excel.Worksheet)
+    Const METHOD_NAME As String = "ApplyWeekendDateHighlighting"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngLastRow As Long
+    Dim rngWeekendDates As Excel.Range
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    lngLastRow = wksOutputAll.Cells(wksOutputAll.Rows.Count, 1).End(xlUp).Row
+    If lngLastRow < 2 Then GoTo ExitPoint
+
+    Set rngWeekendDates = wksOutputAll.Range("I2:K" & CStr(lngLastRow))
+
+    ' Simple formulas without list separators keep the rules locale-safe.
+    With rngWeekendDates.FormatConditions.Add( _
+        Type:=xlExpression, Formula1:="=ISNUMBER(I2)*(WEEKDAY(I2)=7)")
+        .Interior.Color = RGB(226, 239, 218)
+        .StopIfTrue = True
+    End With
+
+    With rngWeekendDates.FormatConditions.Add( _
+        Type:=xlExpression, Formula1:="=ISNUMBER(I2)*(WEEKDAY(I2)=1)")
+        .Interior.Color = RGB(252, 228, 214)
+        .StopIfTrue = True
+    End With
+
+ExitPoint:
+    Set rngWeekendDates = Nothing
+
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-09-10
+' Parameters:    wksTarget - worksheet to format
+' Returns:       None
+' Description:   Wraps and enlarges the frozen header row, auto-fits columns and
+'                caps excessive widths so long headers do not make sheets unwieldy.
+'-------------------------------------------------------------------------------
+Private Sub FormatWorksheetLayout(ByVal wksTarget As Excel.Worksheet)
+    Const METHOD_NAME As String = "FormatWorksheetLayout"
+    Const MAX_COLUMN_WIDTH As Double = 20
+    Const HEADER_HEIGHT_FACTOR As Double = 3
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngColumn As Long
+    Dim lngLastColumn As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    lngLastColumn = wksTarget.Cells(1, wksTarget.Columns.Count).End(xlToLeft).Column
+
+    With wksTarget.Rows(1)
+        .Font.Bold = True
+        .WrapText = True
+        .VerticalAlignment = xlCenter
+        .RowHeight = wksTarget.StandardHeight * HEADER_HEIGHT_FACTOR
+    End With
+
+    wksTarget.UsedRange.Columns.AutoFit
+
+    For lngColumn = 1 To lngLastColumn
+        If wksTarget.Columns(lngColumn).ColumnWidth > MAX_COLUMN_WIDTH Then
+            wksTarget.Columns(lngColumn).ColumnWidth = MAX_COLUMN_WIDTH
+        End If
+    Next lngColumn
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError( _
+        CLASS_NAME, METHOD_NAME, errNumber, errDescription, _
+        "sheet", wksTarget.Name)
     GoTo ExitPoint
 End Sub
 
