@@ -105,11 +105,16 @@ Public Function CreateOutputWorkbook( _
     wksOutputAll.Columns(COL_ACCOUNT).NumberFormat = "@"
     wksOutputAll.Columns(COL_ISIN).NumberFormat = "@"
 
+    Application.StatusBar = "Last Coupon Date Checker: Writing input sheets..."
     Call WriteArrayToWorksheet(wksLHS, arrLHS)
     Call WriteArrayToWorksheet(wksNeolink, arrNeolink)
 
+    Application.StatusBar = "Last Coupon Date Checker: Calculating schedules and accruals..."
     arrOutputAll = BuildOutputAllArray(arrLHS, arrNeolink)
+    Application.StatusBar = "Last Coupon Date Checker: Writing Output_All..."
     Call WriteArrayToWorksheet(wksOutputAll, arrOutputAll)
+
+    Application.StatusBar = "Last Coupon Date Checker: Building analysis sheets..."
     Call BuildAnalysisSheet(wksAnalysis, arrOutputAll)
     Call BuildAccrualAnalysisSheet(wksAccrualAnalysis, arrOutputAll)
 
@@ -121,6 +126,7 @@ Public Function CreateOutputWorkbook( _
     wksLHS.Columns("S:S").NumberFormat = "#,##0.00"
     wksNeolink.Columns("F:G").NumberFormat = "dd/mm/yyyy"
 
+    Application.StatusBar = "Last Coupon Date Checker: Formatting output..."
     Call SetOutputAllNumberFormats(wksOutputAll)
     Call ApplyMatchFormatting(wksOutputAll)
     Call ApplyOutputAllDateHighlighting(wksOutputAll)
@@ -136,6 +142,7 @@ Public Function CreateOutputWorkbook( _
     Call FormatWorksheetLayout(wksAccrualAnalysis)
 
     Call FreezeTopRowOnAllSheets(wkbOutput)
+    Application.StatusBar = "Last Coupon Date Checker: Output created."
 
     Set CreateOutputWorkbook = wkbOutput
     blnCompleted = True
@@ -530,7 +537,6 @@ Private Function BuildPeriodicSchedule( _
     ByRef strReason As String) As Boolean
 
     Const METHOD_NAME As String = "BuildPeriodicSchedule"
-    Const MAX_STEPS As Long = 2400
     Dim datCurrent As Date
     Dim datFirstCoupon As Date
     Dim datMaturity As Date
@@ -538,12 +544,15 @@ Private Function BuildPeriodicSchedule( _
     Dim datStart As Date
     Dim errDescription As String
     Dim errNumber As Long
+    Dim lngMonthDifference As Long
     Dim lngSteps As Long
     Dim strFirstStub As String
     Dim strLastStub As String
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
+    ' Performance-critical routine: calculate the relevant coupon period directly
+    ' with DateDiff/DateAdd. Do not walk the complete coupon history row by row.
     If dblFirstCoupon > 0 Then
         datFirstCoupon = CDate(dblFirstCoupon)
 
@@ -552,33 +561,37 @@ Private Function BuildPeriodicSchedule( _
             GoTo ExitPoint
         End If
 
-        If dblMaturityDate > 0 Then datMaturity = CDate(dblMaturityDate)
+        If dblMaturityDate > 0 Then
+            datMaturity = CDate(dblMaturityDate)
+            If datAccounting >= datMaturity Then
+                dblExpectedLast = CDbl(datMaturity)
+                dblExpectedNext = 0
+                GoTo StubChecks
+            End If
+        End If
 
-        datCurrent = datFirstCoupon
-        lngSteps = 1
-        datNext = DateAdd("m", lngSteps * lngMonths, datFirstCoupon)
+        lngMonthDifference = DateDiff("m", datFirstCoupon, datAccounting)
+        lngSteps = lngMonthDifference \ lngMonths
+        datCurrent = DateAdd("m", lngSteps * lngMonths, datFirstCoupon)
+
+        If datCurrent > datAccounting Then
+            lngSteps = lngSteps - 1
+            datCurrent = DateAdd("m", lngSteps * lngMonths, datFirstCoupon)
+        End If
+
+        datNext = DateAdd("m", (lngSteps + 1) * lngMonths, datFirstCoupon)
+        If datNext <= datAccounting Then
+            lngSteps = lngSteps + 1
+            datCurrent = datNext
+            datNext = DateAdd("m", (lngSteps + 1) * lngMonths, datFirstCoupon)
+        End If
+
         If dblMaturityDate > 0 And datNext > datMaturity Then datNext = datMaturity
 
-        Do While datNext > 0 And datNext <= datAccounting
-            datCurrent = datNext
-
-            If dblMaturityDate > 0 And CLng(datCurrent) = CLng(datMaturity) Then
-                datNext = 0
-                Exit Do
-            End If
-
-            lngSteps = lngSteps + 1
-            If lngSteps > MAX_STEPS Then
-                Err.Raise ERR_OUTPUT, METHOD_NAME, "Coupon schedule exceeded safety limit."
-            End If
-
-            datNext = DateAdd("m", lngSteps * lngMonths, datFirstCoupon)
-            If dblMaturityDate > 0 And datNext > datMaturity Then datNext = datMaturity
-        Loop
-
         dblExpectedLast = CDbl(datCurrent)
-        If datNext > 0 Then dblExpectedNext = CDbl(datNext)
+        dblExpectedNext = CDbl(datNext)
 
+StubChecks:
         If dblStartDate > 0 Then
             datStart = CDate(dblStartDate)
             If CLng(DateAdd("m", -lngMonths, datFirstCoupon)) <> CLng(datStart) Then
@@ -594,19 +607,18 @@ Private Function BuildPeriodicSchedule( _
 
         If datAccounting >= datMaturity Then
             dblExpectedLast = CDbl(datMaturity)
+            dblExpectedNext = 0
         Else
-            lngSteps = 0
-            datCurrent = datMaturity
-            datNext = 0
+            lngMonthDifference = DateDiff("m", datAccounting, datMaturity)
+            lngSteps = lngMonthDifference \ lngMonths
+            datCurrent = DateAdd("m", -lngSteps * lngMonths, datMaturity)
 
-            Do While datCurrent > datAccounting
-                datNext = datCurrent
+            If datCurrent > datAccounting Then
                 lngSteps = lngSteps + 1
-                If lngSteps > MAX_STEPS Then
-                    Err.Raise ERR_OUTPUT, METHOD_NAME, "Coupon schedule exceeded safety limit."
-                End If
                 datCurrent = DateAdd("m", -lngSteps * lngMonths, datMaturity)
-            Loop
+            End If
+
+            datNext = DateAdd("m", -(lngSteps - 1) * lngMonths, datMaturity)
 
             If dblStartDate > 0 Then
                 datStart = CDate(dblStartDate)
@@ -641,28 +653,29 @@ ErrHandler:
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Function
-
 Private Function DetectLastStub( _
     ByVal datFirstCoupon As Date, ByVal datMaturity As Date, _
     ByVal lngMonths As Long) As String
 
     Const METHOD_NAME As String = "DetectLastStub"
-    Const MAX_STEPS As Long = 2400
-    Dim datCurrent As Date
+    Dim datCandidate As Date
     Dim errDescription As String
     Dim errNumber As Long
+    Dim lngMonthDifference As Long
     Dim lngSteps As Long
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    datCurrent = datFirstCoupon
-    Do While datCurrent < datMaturity
-        lngSteps = lngSteps + 1
-        If lngSteps > MAX_STEPS Then Exit Do
-        datCurrent = DateAdd("m", lngSteps * lngMonths, datFirstCoupon)
-    Loop
+    If datMaturity < datFirstCoupon Then
+        DetectLastStub = "POSSIBLE LAST STUB"
+        GoTo ExitPoint
+    End If
 
-    If CLng(datCurrent) <> CLng(datMaturity) Then
+    lngMonthDifference = DateDiff("m", datFirstCoupon, datMaturity)
+    lngSteps = lngMonthDifference \ lngMonths
+    datCandidate = DateAdd("m", lngSteps * lngMonths, datFirstCoupon)
+
+    If CLng(datCandidate) <> CLng(datMaturity) Then
         DetectLastStub = "POSSIBLE LAST STUB"
     End If
 
@@ -678,29 +691,37 @@ ErrHandler:
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Function
-
 Private Function DetectStartMaturityMisalignment( _
     ByVal datStart As Date, ByVal datMaturity As Date, _
     ByVal lngMonths As Long) As String
 
     Const METHOD_NAME As String = "DetectStartMaturityMisalignment"
-    Const MAX_STEPS As Long = 2400
-    Dim datCurrent As Date
+    Dim datCandidate As Date
     Dim errDescription As String
     Dim errNumber As Long
+    Dim lngMonthDifference As Long
     Dim lngSteps As Long
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    datCurrent = datMaturity
-    Do While datCurrent > datStart
-        lngSteps = lngSteps + 1
-        If lngSteps > MAX_STEPS Then Exit Do
-        datCurrent = DateAdd("m", -lngSteps * lngMonths, datMaturity)
-    Loop
+    If datMaturity < datStart Then
+        DetectStartMaturityMisalignment = _
+            "POSSIBLE STUB - START/MATURITY NOT ALIGNED"
+        GoTo ExitPoint
+    End If
 
-    If CLng(datCurrent) <> CLng(datStart) Then
-        DetectStartMaturityMisalignment = "POSSIBLE STUB - START/MATURITY NOT ALIGNED"
+    lngMonthDifference = DateDiff("m", datStart, datMaturity)
+    lngSteps = lngMonthDifference \ lngMonths
+    datCandidate = DateAdd("m", -lngSteps * lngMonths, datMaturity)
+
+    If datCandidate > datStart Then
+        lngSteps = lngSteps + 1
+        datCandidate = DateAdd("m", -lngSteps * lngMonths, datMaturity)
+    End If
+
+    If CLng(datCandidate) <> CLng(datStart) Then
+        DetectStartMaturityMisalignment = _
+            "POSSIBLE STUB - START/MATURITY NOT ALIGNED"
     End If
 
 ExitPoint:
@@ -715,7 +736,6 @@ ErrHandler:
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Function
-
 Private Sub BuildCalendarEndSchedule( _
     ByVal datAccounting As Date, ByVal lngFrequency As Long, _
     ByRef dblExpectedLast As Double, ByRef dblExpectedNext As Double)
@@ -2676,14 +2696,22 @@ Private Sub FormatWorksheetLayout(ByVal wksTarget As Excel.Worksheet)
     Const METHOD_NAME As String = "FormatWorksheetLayout"
     Const MAX_COLUMN_WIDTH As Double = 20
     Const HEADER_HEIGHT_FACTOR As Double = 3
+    Const AUTOFIT_SAMPLE_ROWS As Long = 300
     Dim errDescription As String
     Dim errNumber As Long
     Dim lngColumn As Long
     Dim lngLastColumn As Long
+    Dim lngLastRow As Long
+    Dim lngSampleLastRow As Long
+    Dim rngSample As Excel.Range
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     lngLastColumn = wksTarget.Cells(1, wksTarget.Columns.Count).End(xlToLeft).Column
+    lngLastRow = wksTarget.Cells(wksTarget.Rows.Count, 1).End(xlUp).Row
+    lngSampleLastRow = lngLastRow
+    If lngSampleLastRow > AUTOFIT_SAMPLE_ROWS Then lngSampleLastRow = AUTOFIT_SAMPLE_ROWS
+    If lngSampleLastRow < 1 Then lngSampleLastRow = 1
 
     With wksTarget.Rows(1)
         .Font.Bold = True
@@ -2692,7 +2720,11 @@ Private Sub FormatWorksheetLayout(ByVal wksTarget As Excel.Worksheet)
         .RowHeight = wksTarget.StandardHeight * HEADER_HEIGHT_FACTOR
     End With
 
-    wksTarget.UsedRange.Columns.AutoFit
+    ' AutoFit over a bounded sample only. AutoFit on a very large UsedRange can
+    ' dominate runtime without materially improving widths because all widths are capped.
+    Set rngSample = wksTarget.Range( _
+        wksTarget.Cells(1, 1), wksTarget.Cells(lngSampleLastRow, lngLastColumn))
+    rngSample.Columns.AutoFit
 
     For lngColumn = 1 To lngLastColumn
         If wksTarget.Columns(lngColumn).ColumnWidth > MAX_COLUMN_WIDTH Then
@@ -2701,6 +2733,7 @@ Private Sub FormatWorksheetLayout(ByVal wksTarget As Excel.Worksheet)
     Next lngColumn
 
 ExitPoint:
+    Set rngSample = Nothing
     If errNumber <> 0 Then
         Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
     End If
@@ -2714,7 +2747,6 @@ ErrHandler:
         "sheet", wksTarget.Name)
     GoTo ExitPoint
 End Sub
-
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
 ' Creation date: 2026-09-08
