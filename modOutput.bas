@@ -5,13 +5,65 @@ Private Const OUTPUT_BASE_NAME As String = "Last_Coupon_Date_Checker_"
 Private Const ERR_OUTPUT As Long = vbObjectError + 6600
 Private Const LOOKUP_SEPARATOR As String = "|"
 Private Const PAYMENT_PREVIOUS_WINDOW_DAYS As Long = 10
+Private Const VERIFIED_ACCRUAL_METHOD As Long = 1
+Private Const ACCRUAL_MATCH_TOLERANCE As Double = 0.05
+
+' Output_All column positions. Keep these centralized so formatting and analysis
+' stay aligned when diagnostic columns are added.
+Private Const COL_FUND As Long = 1
+Private Const COL_ACCOUNT As Long = 2
+Private Const COL_ISIN As Long = 3
+Private Const COL_GTI_NAME As Long = 4
+Private Const COL_ACCOUNTING_DATE As Long = 5
+Private Const COL_GENERATION_DATE As Long = 6
+Private Const COL_COUPON_FREQ As Long = 7
+Private Const COL_BOND_CALC As Long = 8
+Private Const COL_START_DATE As Long = 9
+Private Const COL_FIRST_COUPON As Long = 10
+Private Const COL_MATURITY As Long = 11
+Private Const COL_INTEREST_RATE As Long = 12
+Private Const COL_QUANTITY As Long = 13
+Private Const COL_INTEREST_RATE_TYPE As Long = 14
+Private Const COL_INDEXATION_MODE As Long = 15
+Private Const COL_DAYS_SINCE_LAST As Long = 16
+Private Const COL_VALUE_DATE As Long = 17
+Private Const COL_LHS_NEXT As Long = 18
+Private Const COL_EXPECTED_NEXT As Long = 19
+Private Const COL_LHS_LAST As Long = 20
+Private Const COL_EXPECTED_LAST As Long = 21
+Private Const COL_PAYMENT As Long = 22
+Private Const COL_SCHEDULE_MATCH As Long = 23
+Private Const COL_PAYMENT_SHIFT As Long = 24
+Private Const COL_VALIDATION_RESULT As Long = 25
+Private Const COL_PRODUCT_REVIEW As Long = 26
+Private Const COL_STUB_FLAG As Long = 27
+Private Const COL_PAYMENT_MATCH As Long = 28
+Private Const COL_PAYMENT_DIFF As Long = 29
+Private Const COL_PAYMENT_SELECTION As Long = 30
+Private Const COL_LATEST_PAYMENT As Long = 31
+Private Const COL_ACCRUAL_CONVENTION As Long = 32
+Private Const COL_ACCRUAL_PERIOD As Long = 33
+Private Const COL_ACCRUAL_DAYS_SCHEDULE As Long = 34
+Private Const COL_ACCRUAL_DAYS_DIFF As Long = 35
+Private Const COL_ACCRUAL_DAYS_LHS As Long = 36
+Private Const COL_COUPON_PERIOD_DAYS As Long = 37
+Private Const COL_YEAR_FRACTION As Long = 38
+Private Const COL_DAILY_ACCRUAL As Long = 39
+Private Const COL_EXPECTED_ACCRUAL As Long = 40
+Private Const COL_EXPECTED_ACCRUAL_LHS As Long = 41
+Private Const COL_LHS_ACCRUED As Long = 42
+Private Const COL_ACCRUAL_DIFF As Long = 43
+Private Const COL_ACCRUAL_DIFF_PCT As Long = 44
+Private Const COL_ACCRUAL_MATCH As Long = 45
+Private Const COL_ACCRUAL_RESULT As Long = 46
+Private Const OUTPUT_ALL_COLUMN_COUNT As Long = 46
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
 ' Creation date: 2026-09-08
 ' Parameters:    arrLHS - LHS output array; arrNeolink - Neolink output array
 ' Returns:       Excel.Workbook - newly created output workbook
-' Description:   Creates Input LHS, Input Neolink and Output_All sheets.
+' Description:   Creates input, validation, schedule and accrual analysis sheets.
 '-------------------------------------------------------------------------------
 Public Function CreateOutputWorkbook( _
     ByVal arrLHS As Variant, ByVal arrNeolink As Variant) As Excel.Workbook
@@ -22,6 +74,8 @@ Public Function CreateOutputWorkbook( _
     Dim errDescription As String
     Dim errNumber As Long
     Dim wkbOutput As Excel.Workbook
+    Dim wksAccrualAnalysis As Excel.Worksheet
+    Dim wksAnalysis As Excel.Worksheet
     Dim wksLHS As Excel.Worksheet
     Dim wksNeolink As Excel.Worksheet
     Dim wksOutputAll As Excel.Worksheet
@@ -38,29 +92,36 @@ Public Function CreateOutputWorkbook( _
     Set wksOutputAll = wkbOutput.Worksheets.Add(After:=wksNeolink)
     wksOutputAll.Name = "Output_All"
 
+    Set wksAnalysis = wkbOutput.Worksheets.Add(After:=wksOutputAll)
+    wksAnalysis.Name = "Analysis"
+
+    Set wksAccrualAnalysis = wkbOutput.Worksheets.Add(After:=wksAnalysis)
+    wksAccrualAnalysis.Name = "Accrual Analysis"
+
     ' Text identifiers must not be converted to numbers/scientific notation.
     wksLHS.Columns("A:B").NumberFormat = "@"
     wksNeolink.Columns("A:B").NumberFormat = "@"
-    wksOutputAll.Columns("A:C").NumberFormat = "@"
+    wksOutputAll.Columns(COL_FUND).NumberFormat = "@"
+    wksOutputAll.Columns(COL_ACCOUNT).NumberFormat = "@"
+    wksOutputAll.Columns(COL_ISIN).NumberFormat = "@"
 
     Call WriteArrayToWorksheet(wksLHS, arrLHS)
     Call WriteArrayToWorksheet(wksNeolink, arrNeolink)
 
     arrOutputAll = BuildOutputAllArray(arrLHS, arrNeolink)
     Call WriteArrayToWorksheet(wksOutputAll, arrOutputAll)
+    Call BuildAnalysisSheet(wksAnalysis, arrOutputAll)
+    Call BuildAccrualAnalysisSheet(wksAccrualAnalysis, arrOutputAll)
 
-    ' Force all known date columns to the required DD/MM/YYYY display.
+    ' LHS date displays. Optional diagnostic dates are appended in columns O:P.
     wksLHS.Columns("C:D").NumberFormat = "dd/mm/yyyy"
-    wksLHS.Columns("G:G").NumberFormat = "dd/mm/yyyy"
-    wksLHS.Columns("H:H").NumberFormat = "dd/mm/yyyy"
+    wksLHS.Columns("G:H").NumberFormat = "dd/mm/yyyy"
     wksLHS.Columns("K:K").NumberFormat = "dd/mm/yyyy"
+    wksLHS.Columns("O:P").NumberFormat = "dd/mm/yyyy"
+    wksLHS.Columns("S:S").NumberFormat = "#,##0.00"
     wksNeolink.Columns("F:G").NumberFormat = "dd/mm/yyyy"
-    wksOutputAll.Columns("D:D").NumberFormat = "dd/mm/yyyy"
-    wksOutputAll.Columns("E:E").NumberFormat = "dd/mm/yyyy"
-    wksOutputAll.Columns("H:K").NumberFormat = "dd/mm/yyyy"
-    wksOutputAll.Columns("M:M").NumberFormat = "0"
-    wksOutputAll.Columns("O:O").NumberFormat = "dd/mm/yyyy"
 
+    Call SetOutputAllNumberFormats(wksOutputAll)
     Call ApplyMatchFormatting(wksOutputAll)
     Call ApplyOutputAllDateHighlighting(wksOutputAll)
     Call ApplyWeekendDateHighlighting(wksOutputAll)
@@ -71,6 +132,8 @@ Public Function CreateOutputWorkbook( _
     Call FormatWorksheetLayout(wksLHS)
     Call FormatWorksheetLayout(wksNeolink)
     Call FormatWorksheetLayout(wksOutputAll)
+    Call FormatWorksheetLayout(wksAnalysis)
+    Call FormatWorksheetLayout(wksAccrualAnalysis)
 
     Call FreezeTopRowOnAllSheets(wkbOutput)
 
@@ -81,6 +144,8 @@ ExitPoint:
     Set wksLHS = Nothing
     Set wksNeolink = Nothing
     Set wksOutputAll = Nothing
+    Set wksAnalysis = Nothing
+    Set wksAccrualAnalysis = Nothing
 
     If Not blnCompleted Then
         Call CloseWorkbookSafe(wkbOutput, False)
@@ -104,10 +169,10 @@ End Function
 ' Author:        Pawel Ligezka
 ' Creation date: 2026-09-08
 ' Parameters:    arrLHS - complete Input LHS array; arrNeolink - Neolink array
-' Returns:       Variant - fifteen-column Output_All array including headers
-' Description:   Keeps only LHS rows with a non-empty Last Coupon Date. Adds LHS
-'                generation/coupon fields plus Value Date and selected INTR Payment
-'                Date from the same Neolink row, then compares Last Coupon Date.
+' Returns:       Variant - diagnostic Output_All array including headers
+' Description:   Keeps only LHS rows with a non-empty Last Coupon Date, builds an
+'                independent expected coupon schedule and keeps Neolink payment data
+'                as supporting evidence rather than the primary schedule source.
 '-------------------------------------------------------------------------------
 Private Function BuildOutputAllArray( _
     ByVal arrLHS As Variant, ByVal arrNeolink As Variant) As Variant
@@ -116,9 +181,17 @@ Private Function BuildOutputAllArray( _
     Dim arrLookupValue As Variant
     Dim arrResult() As Variant
     Dim blnHasLastCouponDate As Boolean
+    Dim blnHasPayment As Boolean
+    Dim blnScheduleBuilt As Boolean
     Dim dictPreferredPayment As Object
+    Dim dblAccountingDate As Double
+    Dim dblExpectedLast As Double
+    Dim dblExpectedNext As Double
+    Dim dblFirstCoupon As Double
     Dim dblLastCouponDate As Double
+    Dim dblMaturityDate As Double
     Dim dblPaymentDate As Double
+    Dim dblStartDate As Double
     Dim errDescription As String
     Dim errNumber As Long
     Dim lngLastCouponDay As Long
@@ -128,6 +201,9 @@ Private Function BuildOutputAllArray( _
     Dim lngRows As Long
     Dim lngRowsWithLastCouponDate As Long
     Dim strKey As String
+    Dim strProductReview As String
+    Dim strScheduleReason As String
+    Dim strStubFlag As String
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
@@ -140,23 +216,8 @@ Private Function BuildOutputAllArray( _
         End If
     Next lngRow
 
-    ReDim arrResult(1 To lngRowsWithLastCouponDate + 1, 1 To 15)
-
-    arrResult(1, 1) = arrLHS(1, 1)
-    arrResult(1, 2) = "Securities account"
-    arrResult(1, 3) = arrLHS(1, 2)
-    arrResult(1, 4) = arrLHS(1, 7)
-    arrResult(1, 5) = arrLHS(1, 8)
-    arrResult(1, 6) = arrLHS(1, 9)
-    arrResult(1, 7) = arrLHS(1, 10)
-    arrResult(1, 8) = "Neolink Value Date"
-    arrResult(1, 9) = arrLHS(1, 4)
-    arrResult(1, 10) = arrLHS(1, 3)
-    arrResult(1, 11) = "Neolink Payment Date"
-    arrResult(1, 12) = "Last Coupon Date Match"
-    arrResult(1, 13) = "Difference Days"
-    arrResult(1, 14) = "Payment Date Selection"
-    arrResult(1, 15) = "Latest Neolink Payment Date"
+    ReDim arrResult(1 To lngRowsWithLastCouponDate + 1, 1 To OUTPUT_ALL_COLUMN_COUNT)
+    Call SetOutputAllHeaders(arrResult)
 
     lngOutputRow = 1
 
@@ -164,53 +225,137 @@ Private Function BuildOutputAllArray( _
         If HasNonEmptyValue(arrLHS(lngRow, 3)) Then
             lngOutputRow = lngOutputRow + 1
 
-            arrResult(lngOutputRow, 1) = arrLHS(lngRow, 1)
-            arrResult(lngOutputRow, 3) = arrLHS(lngRow, 2)
-            arrResult(lngOutputRow, 4) = arrLHS(lngRow, 7)
-            arrResult(lngOutputRow, 5) = arrLHS(lngRow, 8)
-            arrResult(lngOutputRow, 6) = arrLHS(lngRow, 9)
-            arrResult(lngOutputRow, 7) = arrLHS(lngRow, 10)
-            arrResult(lngOutputRow, 9) = arrLHS(lngRow, 4)
-            arrResult(lngOutputRow, 10) = arrLHS(lngRow, 3)
+            arrResult(lngOutputRow, COL_FUND) = arrLHS(lngRow, 1)
+            arrResult(lngOutputRow, COL_ISIN) = arrLHS(lngRow, 2)
+            arrResult(lngOutputRow, COL_GTI_NAME) = arrLHS(lngRow, 6)
+            arrResult(lngOutputRow, COL_ACCOUNTING_DATE) = arrLHS(lngRow, 7)
+            arrResult(lngOutputRow, COL_GENERATION_DATE) = arrLHS(lngRow, 8)
+            arrResult(lngOutputRow, COL_COUPON_FREQ) = arrLHS(lngRow, 9)
+            arrResult(lngOutputRow, COL_BOND_CALC) = arrLHS(lngRow, 10)
+            arrResult(lngOutputRow, COL_START_DATE) = arrLHS(lngRow, 11)
+            arrResult(lngOutputRow, COL_INTEREST_RATE) = arrLHS(lngRow, 12)
+            If UBound(arrLHS, 2) >= 19 Then
+                arrResult(lngOutputRow, COL_QUANTITY) = arrLHS(lngRow, 19)
+            End If
+            arrResult(lngOutputRow, COL_DAYS_SINCE_LAST) = arrLHS(lngRow, 5)
+            arrResult(lngOutputRow, COL_LHS_NEXT) = arrLHS(lngRow, 4)
+            arrResult(lngOutputRow, COL_LHS_LAST) = arrLHS(lngRow, 3)
+
+            If UBound(arrLHS, 2) >= 15 Then
+                arrResult(lngOutputRow, COL_MATURITY) = arrLHS(lngRow, 15)
+            End If
+            If UBound(arrLHS, 2) >= 16 Then
+                arrResult(lngOutputRow, COL_FIRST_COUPON) = arrLHS(lngRow, 16)
+            End If
+            If UBound(arrLHS, 2) >= 17 Then
+                arrResult(lngOutputRow, COL_INTEREST_RATE_TYPE) = arrLHS(lngRow, 17)
+            End If
+            If UBound(arrLHS, 2) >= 18 Then
+                arrResult(lngOutputRow, COL_INDEXATION_MODE) = arrLHS(lngRow, 18)
+            End If
+
+            strProductReview = GetProductReviewFlag(arrLHS(lngRow, 6))
+            arrResult(lngOutputRow, COL_PRODUCT_REVIEW) = strProductReview
 
             strKey = BuildFundIsinKey(arrLHS(lngRow, 1), arrLHS(lngRow, 2))
+            blnHasPayment = False
+            dblPaymentDate = 0
 
-            If Len(strKey) = 0 Or Not dictPreferredPayment.Exists(strKey) Then
-                arrResult(lngOutputRow, 12) = "NOT FOUND"
-            Else
+            If Len(strKey) > 0 And dictPreferredPayment.Exists(strKey) Then
                 arrLookupValue = dictPreferredPayment(strKey)
                 dblPaymentDate = CDbl(arrLookupValue(0))
+                blnHasPayment = True
 
-                arrResult(lngOutputRow, 2) = CStr(arrLookupValue(1))
+                arrResult(lngOutputRow, COL_ACCOUNT) = CStr(arrLookupValue(1))
                 If CDbl(arrLookupValue(2)) > 0 Then
-                    arrResult(lngOutputRow, 8) = CDbl(arrLookupValue(2))
+                    arrResult(lngOutputRow, COL_VALUE_DATE) = CDbl(arrLookupValue(2))
                 End If
-                arrResult(lngOutputRow, 11) = dblPaymentDate
+                arrResult(lngOutputRow, COL_PAYMENT) = dblPaymentDate
 
                 If CBool(arrLookupValue(3)) Then
-                    arrResult(lngOutputRow, 14) = "PREVIOUS DATE USED"
-                    arrResult(lngOutputRow, 15) = CDbl(arrLookupValue(4))
-                End If
-
-                blnHasLastCouponDate = TryGetExcelDateSerial( _
-                    arrLHS(lngRow, 3), dblLastCouponDate)
-
-                If blnHasLastCouponDate Then
-                    lngLastCouponDay = CLng(Int(dblLastCouponDate))
-                    lngPaymentDay = CLng(Int(dblPaymentDate))
-
-                    If lngLastCouponDay = lngPaymentDay Then
-                        arrResult(lngOutputRow, 12) = "TRUE"
-                    Else
-                        arrResult(lngOutputRow, 12) = "FALSE"
-                    End If
-
-                    ' Positive value means Neolink Payment Date is later than LHS Last Coupon Date.
-                    arrResult(lngOutputRow, 13) = lngPaymentDay - lngLastCouponDay
-                Else
-                    arrResult(lngOutputRow, 12) = "NO LHS DATE"
+                    arrResult(lngOutputRow, COL_PAYMENT_SELECTION) = "PREVIOUS DATE USED"
+                    arrResult(lngOutputRow, COL_LATEST_PAYMENT) = CDbl(arrLookupValue(4))
                 End If
             End If
+
+            blnHasLastCouponDate = TryGetExcelDateSerial( _
+                arrLHS(lngRow, 3), dblLastCouponDate)
+
+            If blnHasPayment And blnHasLastCouponDate Then
+                lngLastCouponDay = CLng(Int(dblLastCouponDate))
+                lngPaymentDay = CLng(Int(dblPaymentDate))
+
+                If lngLastCouponDay = lngPaymentDay Then
+                    arrResult(lngOutputRow, COL_PAYMENT_MATCH) = "TRUE"
+                Else
+                    arrResult(lngOutputRow, COL_PAYMENT_MATCH) = "FALSE"
+                End If
+
+                arrResult(lngOutputRow, COL_PAYMENT_DIFF) = _
+                    lngPaymentDay - lngLastCouponDay
+            ElseIf Not blnHasPayment Then
+                arrResult(lngOutputRow, COL_PAYMENT_MATCH) = "NOT FOUND"
+            End If
+
+            dblAccountingDate = 0
+            dblStartDate = 0
+            dblFirstCoupon = 0
+            dblMaturityDate = 0
+            dblExpectedLast = 0
+            dblExpectedNext = 0
+            strStubFlag = vbNullString
+            strScheduleReason = vbNullString
+
+            Call TryGetExcelDateSerial(arrLHS(lngRow, 7), dblAccountingDate)
+            Call TryGetExcelDateSerial(arrLHS(lngRow, 11), dblStartDate)
+            If UBound(arrLHS, 2) >= 15 Then
+                Call TryGetExcelDateSerial(arrLHS(lngRow, 15), dblMaturityDate)
+            End If
+            If UBound(arrLHS, 2) >= 16 Then
+                Call TryGetExcelDateSerial(arrLHS(lngRow, 16), dblFirstCoupon)
+            End If
+
+            blnScheduleBuilt = TryBuildExpectedCouponSchedule( _
+                dblAccountingDate, dblStartDate, dblFirstCoupon, dblMaturityDate, _
+                arrLHS(lngRow, 9), dblExpectedLast, dblExpectedNext, _
+                strStubFlag, strScheduleReason)
+
+            arrResult(lngOutputRow, COL_STUB_FLAG) = strStubFlag
+
+            If blnScheduleBuilt Then
+                arrResult(lngOutputRow, COL_EXPECTED_LAST) = dblExpectedLast
+                If dblExpectedNext > 0 Then
+                    arrResult(lngOutputRow, COL_EXPECTED_NEXT) = dblExpectedNext
+                End If
+
+                If blnHasLastCouponDate Then
+                    If CLng(Int(dblLastCouponDate)) = CLng(Int(dblExpectedLast)) Then
+                        arrResult(lngOutputRow, COL_SCHEDULE_MATCH) = "TRUE"
+                    Else
+                        arrResult(lngOutputRow, COL_SCHEDULE_MATCH) = "FALSE"
+                    End If
+                Else
+                    arrResult(lngOutputRow, COL_SCHEDULE_MATCH) = "REVIEW"
+                End If
+
+                If blnHasPayment Then
+                    arrResult(lngOutputRow, COL_PAYMENT_SHIFT) = _
+                        CLng(Int(dblPaymentDate)) - CLng(Int(dblExpectedLast))
+                End If
+
+                arrResult(lngOutputRow, COL_VALIDATION_RESULT) = BuildValidationResult( _
+                    CStr(arrResult(lngOutputRow, COL_SCHEDULE_MATCH)), _
+                    strProductReview, strStubFlag, blnHasPayment, _
+                    arrResult(lngOutputRow, COL_PAYMENT_SHIFT))
+            Else
+                arrResult(lngOutputRow, COL_SCHEDULE_MATCH) = "REVIEW"
+                arrResult(lngOutputRow, COL_VALIDATION_RESULT) = strScheduleReason
+            End If
+
+            Call PopulateAccrualDiagnostics( _
+                arrResult, lngOutputRow, arrLHS, lngRow, blnScheduleBuilt, _
+                dblAccountingDate, dblExpectedLast, dblExpectedNext, _
+                strProductReview, strStubFlag)
         End If
     Next lngRow
 
@@ -219,6 +364,556 @@ Private Function BuildOutputAllArray( _
 ExitPoint:
     Set dictPreferredPayment = Nothing
 
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+Private Sub SetOutputAllHeaders(ByRef arrResult As Variant)
+    Const METHOD_NAME As String = "SetOutputAllHeaders"
+    Dim errDescription As String
+    Dim errNumber As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    arrResult(1, COL_FUND) = "FUND CODE"
+    arrResult(1, COL_ACCOUNT) = "Securities account"
+    arrResult(1, COL_ISIN) = "EXTERNAL VALUE CODE"
+    arrResult(1, COL_GTI_NAME) = "GTI NAME"
+    arrResult(1, COL_ACCOUNTING_DATE) = "ACCOUNTING DATE_1"
+    arrResult(1, COL_GENERATION_DATE) = "GENERATION DATE AND TIME"
+    arrResult(1, COL_COUPON_FREQ) = "Coupon frequency/IRS-CDS"
+    arrResult(1, COL_BOND_CALC) = "BOND CALC METHOD/IRS-CDS"
+    arrResult(1, COL_START_DATE) = "START DATE"
+    arrResult(1, COL_FIRST_COUPON) = "FIRST COUPON DATE"
+    arrResult(1, COL_MATURITY) = "MATURITY DATE"
+    arrResult(1, COL_INTEREST_RATE) = "INTEREST RATE"
+    arrResult(1, COL_QUANTITY) = "QUANTITY"
+    arrResult(1, COL_INTEREST_RATE_TYPE) = "INTEREST RATE TYPE"
+    arrResult(1, COL_INDEXATION_MODE) = "SECURITY INDEXATION MODE"
+    arrResult(1, COL_DAYS_SINCE_LAST) = "NBR OF DAYS SINCE LAST COUPON"
+    arrResult(1, COL_VALUE_DATE) = "Neolink Value Date"
+    arrResult(1, COL_LHS_NEXT) = "NEXT COUPON DATE"
+    arrResult(1, COL_EXPECTED_NEXT) = "Expected Next Coupon Date"
+    arrResult(1, COL_LHS_LAST) = "LAST COUPON DATE"
+    arrResult(1, COL_EXPECTED_LAST) = "Expected Last Coupon Date"
+    arrResult(1, COL_PAYMENT) = "Neolink Payment Date"
+    arrResult(1, COL_SCHEDULE_MATCH) = "Schedule Match"
+    arrResult(1, COL_PAYMENT_SHIFT) = "Payment Shift Days"
+    arrResult(1, COL_VALIDATION_RESULT) = "Validation Result"
+    arrResult(1, COL_PRODUCT_REVIEW) = "Product Review Flag"
+    arrResult(1, COL_STUB_FLAG) = "Possible Stub Flag"
+    arrResult(1, COL_PAYMENT_MATCH) = "Last Coupon vs Payment Match"
+    arrResult(1, COL_PAYMENT_DIFF) = "Payment vs LHS Difference Days"
+    arrResult(1, COL_PAYMENT_SELECTION) = "Payment Date Selection"
+    arrResult(1, COL_LATEST_PAYMENT) = "Latest Neolink Payment Date"
+    arrResult(1, COL_ACCRUAL_CONVENTION) = "Accrual Convention"
+    arrResult(1, COL_ACCRUAL_PERIOD) = "Accrual Period"
+    arrResult(1, COL_ACCRUAL_DAYS_SCHEDULE) = "Accrual Days - Schedule"
+    arrResult(1, COL_ACCRUAL_DAYS_DIFF) = "Accrual Days Difference (LHS - Expected)"
+    arrResult(1, COL_ACCRUAL_DAYS_LHS) = "Accrual Days - LHS Date"
+    arrResult(1, COL_COUPON_PERIOD_DAYS) = "Coupon Period Days"
+    arrResult(1, COL_YEAR_FRACTION) = "Year Fraction - Schedule"
+    arrResult(1, COL_DAILY_ACCRUAL) = "Daily Accrual"
+    arrResult(1, COL_EXPECTED_ACCRUAL) = "Expected Accrual - Schedule"
+    arrResult(1, COL_EXPECTED_ACCRUAL_LHS) = "Expected Accrual - LHS Date"
+    arrResult(1, COL_LHS_ACCRUED) = "LHS Accrued Interest ACC'S CCY"
+    arrResult(1, COL_ACCRUAL_DIFF) = "Accrual Difference (LHS - Expected)"
+    arrResult(1, COL_ACCRUAL_DIFF_PCT) = "Accrual Difference %"
+    arrResult(1, COL_ACCRUAL_MATCH) = "Accrual Match"
+    arrResult(1, COL_ACCRUAL_RESULT) = "Accrual Validation Result"
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+Private Function TryBuildExpectedCouponSchedule( _
+    ByVal dblAccountingDate As Double, ByVal dblStartDate As Double, _
+    ByVal dblFirstCoupon As Double, ByVal dblMaturityDate As Double, _
+    ByVal vFrequency As Variant, ByRef dblExpectedLast As Double, _
+    ByRef dblExpectedNext As Double, ByRef strStubFlag As String, _
+    ByRef strReason As String) As Boolean
+
+    Const METHOD_NAME As String = "TryBuildExpectedCouponSchedule"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngFrequency As Long
+    Dim lngMonths As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    dblExpectedLast = 0
+    dblExpectedNext = 0
+    strStubFlag = vbNullString
+    strReason = vbNullString
+
+    If dblAccountingDate <= 0 Then
+        strReason = "REVIEW - ACCOUNTING DATE MISSING"
+        GoTo ExitPoint
+    End If
+
+    If Not TryGetLongCode(vFrequency, lngFrequency) Then
+        strReason = "REVIEW - COUPON FREQUENCY MISSING"
+        GoTo ExitPoint
+    End If
+
+    Select Case lngFrequency
+        Case 1 To 4
+            Call BuildCalendarEndSchedule( _
+                CDate(dblAccountingDate), lngFrequency, dblExpectedLast, dblExpectedNext)
+            strStubFlag = "CALENDAR-END FREQUENCY - REVIEW"
+            TryBuildExpectedCouponSchedule = True
+
+        Case 5 To 8
+            Select Case lngFrequency
+                Case 5: lngMonths = 1
+                Case 6: lngMonths = 3
+                Case 7: lngMonths = 6
+                Case 8: lngMonths = 12
+            End Select
+
+            If dblMaturityDate <= 0 And dblFirstCoupon <= 0 Then
+                strReason = "REVIEW - MATURITY/FIRST COUPON DATE MISSING"
+                GoTo ExitPoint
+            End If
+
+            If Not BuildPeriodicSchedule( _
+                CDate(dblAccountingDate), dblStartDate, dblFirstCoupon, _
+                dblMaturityDate, lngMonths, dblExpectedLast, dblExpectedNext, _
+                strStubFlag, strReason) Then
+                GoTo ExitPoint
+            End If
+
+            TryBuildExpectedCouponSchedule = True
+
+        Case 9
+            strReason = "REVIEW - MATURITY-ONLY FREQUENCY"
+
+        Case Else
+            strReason = "REVIEW - UNSUPPORTED COUPON FREQUENCY"
+    End Select
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+Private Function BuildPeriodicSchedule( _
+    ByVal datAccounting As Date, ByVal dblStartDate As Double, _
+    ByVal dblFirstCoupon As Double, ByVal dblMaturityDate As Double, _
+    ByVal lngMonths As Long, ByRef dblExpectedLast As Double, _
+    ByRef dblExpectedNext As Double, ByRef strStubFlag As String, _
+    ByRef strReason As String) As Boolean
+
+    Const METHOD_NAME As String = "BuildPeriodicSchedule"
+    Const MAX_STEPS As Long = 2400
+    Dim datCurrent As Date
+    Dim datFirstCoupon As Date
+    Dim datMaturity As Date
+    Dim datNext As Date
+    Dim datStart As Date
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngSteps As Long
+    Dim strFirstStub As String
+    Dim strLastStub As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If dblFirstCoupon > 0 Then
+        datFirstCoupon = CDate(dblFirstCoupon)
+
+        If datAccounting < datFirstCoupon Then
+            strReason = "REVIEW - ACCOUNTING DATE BEFORE FIRST COUPON"
+            GoTo ExitPoint
+        End If
+
+        If dblMaturityDate > 0 Then datMaturity = CDate(dblMaturityDate)
+
+        datCurrent = datFirstCoupon
+        lngSteps = 1
+        datNext = DateAdd("m", lngSteps * lngMonths, datFirstCoupon)
+        If dblMaturityDate > 0 And datNext > datMaturity Then datNext = datMaturity
+
+        Do While datNext > 0 And datNext <= datAccounting
+            datCurrent = datNext
+
+            If dblMaturityDate > 0 And CLng(datCurrent) = CLng(datMaturity) Then
+                datNext = 0
+                Exit Do
+            End If
+
+            lngSteps = lngSteps + 1
+            If lngSteps > MAX_STEPS Then
+                Err.Raise ERR_OUTPUT, METHOD_NAME, "Coupon schedule exceeded safety limit."
+            End If
+
+            datNext = DateAdd("m", lngSteps * lngMonths, datFirstCoupon)
+            If dblMaturityDate > 0 And datNext > datMaturity Then datNext = datMaturity
+        Loop
+
+        dblExpectedLast = CDbl(datCurrent)
+        If datNext > 0 Then dblExpectedNext = CDbl(datNext)
+
+        If dblStartDate > 0 Then
+            datStart = CDate(dblStartDate)
+            If CLng(DateAdd("m", -lngMonths, datFirstCoupon)) <> CLng(datStart) Then
+                strFirstStub = "POSSIBLE FIRST STUB"
+            End If
+        End If
+
+        If dblMaturityDate > 0 Then
+            strLastStub = DetectLastStub(datFirstCoupon, datMaturity, lngMonths)
+        End If
+    Else
+        datMaturity = CDate(dblMaturityDate)
+
+        If datAccounting >= datMaturity Then
+            dblExpectedLast = CDbl(datMaturity)
+        Else
+            lngSteps = 0
+            datCurrent = datMaturity
+            datNext = 0
+
+            Do While datCurrent > datAccounting
+                datNext = datCurrent
+                lngSteps = lngSteps + 1
+                If lngSteps > MAX_STEPS Then
+                    Err.Raise ERR_OUTPUT, METHOD_NAME, "Coupon schedule exceeded safety limit."
+                End If
+                datCurrent = DateAdd("m", -lngSteps * lngMonths, datMaturity)
+            Loop
+
+            If dblStartDate > 0 Then
+                datStart = CDate(dblStartDate)
+                If datCurrent < datStart Then
+                    strReason = "REVIEW - ACCOUNTING DATE BEFORE FIRST REGULAR COUPON"
+                    GoTo ExitPoint
+                End If
+            End If
+
+            dblExpectedLast = CDbl(datCurrent)
+            dblExpectedNext = CDbl(datNext)
+        End If
+
+        If dblStartDate > 0 Then
+            strFirstStub = DetectStartMaturityMisalignment( _
+                CDate(dblStartDate), datMaturity, lngMonths)
+        End If
+    End If
+
+    strStubFlag = JoinFlags(strFirstStub, strLastStub)
+    BuildPeriodicSchedule = True
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+Private Function DetectLastStub( _
+    ByVal datFirstCoupon As Date, ByVal datMaturity As Date, _
+    ByVal lngMonths As Long) As String
+
+    Const METHOD_NAME As String = "DetectLastStub"
+    Const MAX_STEPS As Long = 2400
+    Dim datCurrent As Date
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngSteps As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    datCurrent = datFirstCoupon
+    Do While datCurrent < datMaturity
+        lngSteps = lngSteps + 1
+        If lngSteps > MAX_STEPS Then Exit Do
+        datCurrent = DateAdd("m", lngSteps * lngMonths, datFirstCoupon)
+    Loop
+
+    If CLng(datCurrent) <> CLng(datMaturity) Then
+        DetectLastStub = "POSSIBLE LAST STUB"
+    End If
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+Private Function DetectStartMaturityMisalignment( _
+    ByVal datStart As Date, ByVal datMaturity As Date, _
+    ByVal lngMonths As Long) As String
+
+    Const METHOD_NAME As String = "DetectStartMaturityMisalignment"
+    Const MAX_STEPS As Long = 2400
+    Dim datCurrent As Date
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngSteps As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    datCurrent = datMaturity
+    Do While datCurrent > datStart
+        lngSteps = lngSteps + 1
+        If lngSteps > MAX_STEPS Then Exit Do
+        datCurrent = DateAdd("m", -lngSteps * lngMonths, datMaturity)
+    Loop
+
+    If CLng(datCurrent) <> CLng(datStart) Then
+        DetectStartMaturityMisalignment = "POSSIBLE STUB - START/MATURITY NOT ALIGNED"
+    End If
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+Private Sub BuildCalendarEndSchedule( _
+    ByVal datAccounting As Date, ByVal lngFrequency As Long, _
+    ByRef dblExpectedLast As Double, ByRef dblExpectedNext As Double)
+
+    Const METHOD_NAME As String = "BuildCalendarEndSchedule"
+    Dim datPeriodEnd As Date
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngMonth As Long
+    Dim lngPeriodMonths As Long
+    Dim lngYear As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    lngYear = Year(datAccounting)
+    lngMonth = Month(datAccounting)
+
+    Select Case lngFrequency
+        Case 1
+            lngPeriodMonths = 1
+            datPeriodEnd = DateSerial(lngYear, lngMonth + 1, 0)
+        Case 2
+            lngPeriodMonths = 3
+            datPeriodEnd = DateSerial(lngYear, ((lngMonth - 1) \ 3 + 1) * 3 + 1, 0)
+        Case 3
+            lngPeriodMonths = 6
+            If lngMonth <= 6 Then
+                datPeriodEnd = DateSerial(lngYear, 7, 0)
+            Else
+                datPeriodEnd = DateSerial(lngYear + 1, 1, 0)
+            End If
+        Case 4
+            lngPeriodMonths = 12
+            datPeriodEnd = DateSerial(lngYear + 1, 1, 0)
+    End Select
+
+    If CLng(datAccounting) >= CLng(datPeriodEnd) Then
+        dblExpectedLast = CDbl(datPeriodEnd)
+        dblExpectedNext = CDbl(DateSerial( _
+            Year(DateAdd("m", lngPeriodMonths, datPeriodEnd)), _
+            Month(DateAdd("m", lngPeriodMonths, datPeriodEnd)) + 1, 0))
+    Else
+        dblExpectedNext = CDbl(datPeriodEnd)
+        dblExpectedLast = CDbl(DateSerial( _
+            Year(DateAdd("m", -lngPeriodMonths, datPeriodEnd)), _
+            Month(DateAdd("m", -lngPeriodMonths, datPeriodEnd)) + 1, 0))
+    End If
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+Private Function TryGetLongCode(ByVal vValue As Variant, ByRef lngCode As Long) As Boolean
+    Const METHOD_NAME As String = "TryGetLongCode"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strValue As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    lngCode = 0
+    If IsError(vValue) Or IsEmpty(vValue) Then GoTo ExitPoint
+
+    strValue = Trim$(CStr(vValue))
+    If Len(strValue) = 0 Then GoTo ExitPoint
+    If Not IsNumeric(strValue) Then GoTo ExitPoint
+
+    lngCode = CLng(strValue)
+    TryGetLongCode = True
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+Private Function GetProductReviewFlag(ByVal vGtiName As Variant) As String
+    Const METHOD_NAME As String = "GetProductReviewFlag"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strName As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If IsError(vGtiName) Or IsEmpty(vGtiName) Then GoTo ExitPoint
+    strName = UCase$(Trim$(CStr(vGtiName)))
+
+    If InStr(1, strName, "MBS", vbTextCompare) > 0 Then
+        GetProductReviewFlag = "REVIEW - MBS"
+    ElseIf InStr(1, strName, "ABS", vbTextCompare) > 0 Then
+        GetProductReviewFlag = "REVIEW - ABS"
+    ElseIf InStr(1, strName, "AMORT", vbTextCompare) > 0 Then
+        GetProductReviewFlag = "REVIEW - AMORTIZING"
+    ElseIf InStr(1, strName, "FLOAT", vbTextCompare) > 0 Or _
+           InStr(1, strName, "FRN", vbTextCompare) > 0 Or _
+           InStr(1, strName, "VARIABLE", vbTextCompare) > 0 Then
+        GetProductReviewFlag = "REVIEW - FLOATING/VARIABLE"
+    ElseIf InStr(1, strName, "CALLABLE", vbTextCompare) > 0 Then
+        GetProductReviewFlag = "REVIEW - CALLABLE"
+    End If
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+Private Function BuildValidationResult( _
+    ByVal strScheduleMatch As String, ByVal strProductReview As String, _
+    ByVal strStubFlag As String, ByVal blnHasPayment As Boolean, _
+    ByVal vPaymentShift As Variant) As String
+
+    Const METHOD_NAME As String = "BuildValidationResult"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strReview As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strReview = JoinFlags(strProductReview, strStubFlag)
+
+    If Len(strReview) > 0 Then
+        If UCase$(strScheduleMatch) = "TRUE" Then
+            BuildValidationResult = strReview & " / SCHEDULE MATCH"
+        ElseIf UCase$(strScheduleMatch) = "FALSE" Then
+            BuildValidationResult = strReview & " / SCHEDULE MISMATCH"
+        Else
+            BuildValidationResult = strReview
+        End If
+        GoTo ExitPoint
+    End If
+
+    If UCase$(strScheduleMatch) = "FALSE" Then
+        BuildValidationResult = "LHS LAST COUPON MISMATCH"
+    ElseIf UCase$(strScheduleMatch) = "TRUE" Then
+        If Not blnHasPayment Then
+            BuildValidationResult = "SCHEDULE OK - PAYMENT NOT FOUND"
+        ElseIf IsNumeric(vPaymentShift) And CLng(vPaymentShift) <> 0 Then
+            BuildValidationResult = "SCHEDULE OK - PAYMENT SHIFTED"
+        Else
+            BuildValidationResult = "SCHEDULE OK"
+        End If
+    Else
+        BuildValidationResult = "REVIEW"
+    End If
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+Private Function JoinFlags(ByVal strFirst As String, ByVal strSecond As String) As String
+    Const METHOD_NAME As String = "JoinFlags"
+    Dim errDescription As String
+    Dim errNumber As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If Len(Trim$(strFirst)) > 0 And Len(Trim$(strSecond)) > 0 Then
+        JoinFlags = Trim$(strFirst) & "; " & Trim$(strSecond)
+    ElseIf Len(Trim$(strFirst)) > 0 Then
+        JoinFlags = Trim$(strFirst)
+    Else
+        JoinFlags = Trim$(strSecond)
+    End If
+
+ExitPoint:
     If errNumber <> 0 Then
         Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
     End If
@@ -558,22 +1253,23 @@ Private Sub ApplyMatchFormatting(ByVal wksOutputAll As Excel.Worksheet)
     lngLastRow = wksOutputAll.Cells(wksOutputAll.Rows.Count, 1).End(xlUp).Row
     If lngLastRow < 2 Then GoTo ExitPoint
 
-    Set rngMatch = wksOutputAll.Range("L2:L" & CStr(lngLastRow))
-    rngMatch.FormatConditions.Delete
+    Set rngMatch = wksOutputAll.Range( _
+        wksOutputAll.Cells(2, COL_SCHEDULE_MATCH), _
+        wksOutputAll.Cells(lngLastRow, COL_SCHEDULE_MATCH))
+    Call AddTrueFalseFormatting(rngMatch)
 
-    With rngMatch.FormatConditions.Add( _
-        Type:=xlExpression, Formula1:="=$L2=""TRUE""")
-        .Interior.Color = RGB(198, 239, 206)
-    End With
+    Set rngMatch = wksOutputAll.Range( _
+        wksOutputAll.Cells(2, COL_PAYMENT_MATCH), _
+        wksOutputAll.Cells(lngLastRow, COL_PAYMENT_MATCH))
+    Call AddTrueFalseFormatting(rngMatch)
 
-    With rngMatch.FormatConditions.Add( _
-        Type:=xlExpression, Formula1:="=$L2=""FALSE""")
-        .Interior.Color = RGB(255, 199, 206)
-    End With
+    Set rngMatch = wksOutputAll.Range( _
+        wksOutputAll.Cells(2, COL_ACCRUAL_MATCH), _
+        wksOutputAll.Cells(lngLastRow, COL_ACCRUAL_MATCH))
+    Call AddTrueFalseFormatting(rngMatch)
 
 ExitPoint:
     Set rngMatch = Nothing
-
     If errNumber <> 0 Then
         Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
     End If
@@ -586,14 +1282,40 @@ ErrHandler:
     GoTo ExitPoint
 End Sub
 
-'-------------------------------------------------------------------------------
-' Author:        Pawel Ligezka
-' Creation date: 2026-09-08
-' Parameters:    wksOutputAll - Output_All worksheet
-' Returns:       None
-' Description:   Visually distinguishes the two dates being compared. Uses very
-'                light fills so the output remains readable and print-friendly.
-'-------------------------------------------------------------------------------
+Private Sub AddTrueFalseFormatting(ByVal rngTarget As Excel.Range)
+    Const METHOD_NAME As String = "AddTrueFalseFormatting"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strAddress As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    rngTarget.FormatConditions.Delete
+    strAddress = rngTarget.Cells(1, 1).Address(RowAbsolute:=False, ColumnAbsolute:=True)
+
+    With rngTarget.FormatConditions.Add( _
+        Type:=xlExpression, Formula1:="=" & strAddress & "=" & Chr$(34) & "TRUE" & Chr$(34))
+        .Interior.Color = RGB(198, 239, 206)
+    End With
+
+    With rngTarget.FormatConditions.Add( _
+        Type:=xlExpression, Formula1:="=" & strAddress & "=" & Chr$(34) & "FALSE" & Chr$(34))
+        .Interior.Color = RGB(255, 199, 206)
+    End With
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
 Private Sub ApplyOutputAllDateHighlighting(ByVal wksOutputAll As Excel.Worksheet)
     Const METHOD_NAME As String = "ApplyOutputAllDateHighlighting"
     Dim errDescription As String
@@ -606,20 +1328,29 @@ Private Sub ApplyOutputAllDateHighlighting(ByVal wksOutputAll As Excel.Worksheet
 
     lngLastRow = wksOutputAll.Cells(wksOutputAll.Rows.Count, 1).End(xlUp).Row
 
-    With wksOutputAll.Range("J1")
+    With wksOutputAll.Cells(1, COL_LHS_LAST)
         .Font.Bold = True
         .Interior.Color = RGB(255, 246, 214)
     End With
 
-    With wksOutputAll.Range("K1")
+    With wksOutputAll.Cells(1, COL_PAYMENT)
         .Font.Bold = True
         .Interior.Color = RGB(221, 235, 247)
     End With
 
+    With wksOutputAll.Cells(1, COL_EXPECTED_LAST)
+        .Font.Bold = True
+        .Interior.Color = RGB(226, 239, 218)
+    End With
+
     If lngLastRow < 2 Then GoTo ExitPoint
 
-    Set rngLastCoupon = wksOutputAll.Range("J2:J" & CStr(lngLastRow))
-    Set rngPaymentDate = wksOutputAll.Range("K2:K" & CStr(lngLastRow))
+    Set rngLastCoupon = wksOutputAll.Range( _
+        wksOutputAll.Cells(2, COL_LHS_LAST), _
+        wksOutputAll.Cells(lngLastRow, COL_LHS_LAST))
+    Set rngPaymentDate = wksOutputAll.Range( _
+        wksOutputAll.Cells(2, COL_PAYMENT), _
+        wksOutputAll.Cells(lngLastRow, COL_PAYMENT))
 
     rngLastCoupon.Interior.Color = RGB(255, 252, 240)
     rngPaymentDate.Interior.Color = RGB(245, 250, 255)
@@ -627,7 +1358,6 @@ Private Sub ApplyOutputAllDateHighlighting(ByVal wksOutputAll As Excel.Worksheet
 ExitPoint:
     Set rngLastCoupon = Nothing
     Set rngPaymentDate = Nothing
-
     If errNumber <> 0 Then
         Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
     End If
@@ -640,14 +1370,6 @@ ErrHandler:
     GoTo ExitPoint
 End Sub
 
-'-------------------------------------------------------------------------------
-' Author:        Pawel Ligezka
-' Creation date: 2026-09-09
-' Parameters:    wksOutputAll - Output_All worksheet
-' Returns:       None
-' Description:   Gives Neolink Value Date a light red fill when it differs from
-'                Payment Date. Blank or non-date Value Dates are not highlighted.
-'-------------------------------------------------------------------------------
 Private Sub ApplyValueDateMismatchFormatting(ByVal wksOutputAll As Excel.Worksheet)
     Const METHOD_NAME As String = "ApplyValueDateMismatchFormatting"
     Dim arrPaymentDate As Variant
@@ -659,9 +1381,6 @@ Private Sub ApplyValueDateMismatchFormatting(ByVal wksOutputAll As Excel.Workshe
     Dim errNumber As Long
     Dim lngIndex As Long
     Dim lngLastRow As Long
-    Dim lngRunStart As Long
-    Dim rngMismatch As Excel.Range
-    Dim rngRun As Excel.Range
     Dim rngValueDate As Excel.Range
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
@@ -669,19 +1388,18 @@ Private Sub ApplyValueDateMismatchFormatting(ByVal wksOutputAll As Excel.Workshe
     lngLastRow = wksOutputAll.Cells(wksOutputAll.Rows.Count, 1).End(xlUp).Row
     If lngLastRow < 2 Then GoTo ExitPoint
 
-    Set rngValueDate = wksOutputAll.Range("H2:H" & CStr(lngLastRow))
+    Set rngValueDate = wksOutputAll.Range( _
+        wksOutputAll.Cells(2, COL_VALUE_DATE), _
+        wksOutputAll.Cells(lngLastRow, COL_VALUE_DATE))
     arrValueDate = rngValueDate.Value2
-    arrPaymentDate = wksOutputAll.Range("K2:K" & CStr(lngLastRow)).Value2
+    arrPaymentDate = wksOutputAll.Range( _
+        wksOutputAll.Cells(2, COL_PAYMENT), _
+        wksOutputAll.Cells(lngLastRow, COL_PAYMENT)).Value2
 
-    ' Remove only formatting previously applied by this routine.
-    rngValueDate.FormatConditions.Delete
     rngValueDate.Interior.Pattern = xlNone
 
-    ' Compare the values in VBA instead of using a conditional-format formula.
-    ' This avoids locale-dependent Formula1 parsing that can raise VBA Error 5.
     For lngIndex = 1 To UBound(arrValueDate, 1)
         blnMismatch = False
-
         If TryGetExcelDateSerial(arrValueDate(lngIndex, 1), dblValueDate) Then
             If TryGetExcelDateSerial(arrPaymentDate(lngIndex, 1), dblPaymentDate) Then
                 blnMismatch = (CLng(Int(dblValueDate)) <> CLng(Int(dblPaymentDate)))
@@ -689,37 +1407,12 @@ Private Sub ApplyValueDateMismatchFormatting(ByVal wksOutputAll As Excel.Workshe
         End If
 
         If blnMismatch Then
-            If lngRunStart = 0 Then lngRunStart = lngIndex
-        ElseIf lngRunStart > 0 Then
-            Set rngRun = rngValueDate.Cells(lngRunStart, 1).Resize(lngIndex - lngRunStart, 1)
-            If rngMismatch Is Nothing Then
-                Set rngMismatch = rngRun
-            Else
-                Set rngMismatch = Application.Union(rngMismatch, rngRun)
-            End If
-            lngRunStart = 0
+            rngValueDate.Cells(lngIndex, 1).Interior.Color = RGB(255, 230, 230)
         End If
     Next lngIndex
 
-    If lngRunStart > 0 Then
-        Set rngRun = rngValueDate.Cells(lngRunStart, 1).Resize( _
-            UBound(arrValueDate, 1) - lngRunStart + 1, 1)
-        If rngMismatch Is Nothing Then
-            Set rngMismatch = rngRun
-        Else
-            Set rngMismatch = Application.Union(rngMismatch, rngRun)
-        End If
-    End If
-
-    If Not rngMismatch Is Nothing Then
-        rngMismatch.Interior.Color = RGB(255, 230, 230)
-    End If
-
 ExitPoint:
-    Set rngRun = Nothing
-    Set rngMismatch = Nothing
     Set rngValueDate = Nothing
-
     If errNumber <> 0 Then
         Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
     End If
@@ -732,84 +1425,39 @@ ErrHandler:
     GoTo ExitPoint
 End Sub
 
- '-------------------------------------------------------------------------------
-' Author:        Pawel Ligezka
-' Creation date: 2026-09-10
-' Parameters:    wksOutputAll - Output_All worksheet
-' Returns:       None
-' Description:   Marks Fund + ISIN cases where the 10-day diagnostic rule selected
-'                the immediately preceding Payment Date instead of the latest one.
-'                The ISIN and diagnostic cells receive a light yellow fill so the
-'                hypothesis can be reviewed easily without changing business logic.
-'-------------------------------------------------------------------------------
 Private Sub ApplyPreviousPaymentSelectionFormatting(ByVal wksOutputAll As Excel.Worksheet)
     Const METHOD_NAME As String = "ApplyPreviousPaymentSelectionFormatting"
-    Dim arrSelection As Variant
     Dim errDescription As String
     Dim errNumber As Long
-    Dim lngIndex As Long
+    Dim lngRow As Long
     Dim lngLastRow As Long
-    Dim lngRunStart As Long
-    Dim rngFlagged As Excel.Range
-    Dim rngRun As Excel.Range
-    Dim rngSelection As Excel.Range
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     lngLastRow = wksOutputAll.Cells(wksOutputAll.Rows.Count, 1).End(xlUp).Row
     If lngLastRow < 2 Then GoTo ExitPoint
 
-    Set rngSelection = wksOutputAll.Range("N2:N" & CStr(lngLastRow))
-    arrSelection = rngSelection.Value2
-
-    For lngIndex = 1 To UBound(arrSelection, 1)
-        If UCase$(Trim$(CStr(arrSelection(lngIndex, 1)))) = "PREVIOUS DATE USED" Then
-            If lngRunStart = 0 Then lngRunStart = lngIndex
-        ElseIf lngRunStart > 0 Then
-            Set rngRun = wksOutputAll.Range( _
-                "C" & CStr(lngRunStart + 1) & ":C" & CStr(lngIndex))
-            If rngFlagged Is Nothing Then
-                Set rngFlagged = rngRun
-            Else
-                Set rngFlagged = Application.Union(rngFlagged, rngRun)
-            End If
-            lngRunStart = 0
-        End If
-    Next lngIndex
-
-    If lngRunStart > 0 Then
-        Set rngRun = wksOutputAll.Range( _
-            "C" & CStr(lngRunStart + 1) & ":C" & CStr(lngLastRow))
-        If rngFlagged Is Nothing Then
-            Set rngFlagged = rngRun
-        Else
-            Set rngFlagged = Application.Union(rngFlagged, rngRun)
-        End If
-    End If
-
-    If Not rngFlagged Is Nothing Then
-        rngFlagged.Interior.Color = RGB(255, 242, 204)
-    End If
-
-    With wksOutputAll.Range("N1:O1")
+    With wksOutputAll.Range( _
+        wksOutputAll.Cells(1, COL_PAYMENT_SELECTION), _
+        wksOutputAll.Cells(1, COL_LATEST_PAYMENT))
         .Font.Bold = True
         .Interior.Color = RGB(255, 242, 204)
     End With
 
-    For lngIndex = 2 To lngLastRow
-        If UCase$(Trim$(CStr(wksOutputAll.Cells(lngIndex, 14).Value2))) = _
-           "PREVIOUS DATE USED" Then
+    For lngRow = 2 To lngLastRow
+        If UCase$(Trim$(CStr( _
+            wksOutputAll.Cells(lngRow, COL_PAYMENT_SELECTION).Value2))) = _
+            "PREVIOUS DATE USED" Then
+
+            wksOutputAll.Cells(lngRow, COL_ISIN).Interior.Color = RGB(255, 242, 204)
             wksOutputAll.Range( _
-                wksOutputAll.Cells(lngIndex, 14), _
-                wksOutputAll.Cells(lngIndex, 15)).Interior.Color = RGB(255, 242, 204)
+                wksOutputAll.Cells(lngRow, COL_PAYMENT_SELECTION), _
+                wksOutputAll.Cells(lngRow, COL_LATEST_PAYMENT)).Interior.Color = _
+                RGB(255, 242, 204)
         End If
-    Next lngIndex
+    Next lngRow
 
 ExitPoint:
-    Set rngSelection = Nothing
-    Set rngRun = Nothing
-    Set rngFlagged = Nothing
-
     If errNumber <> 0 Then
         Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
     End If
@@ -822,15 +1470,6 @@ ErrHandler:
     GoTo ExitPoint
 End Sub
 
- '-------------------------------------------------------------------------------
-' Author:        Pawel Ligezka
-' Creation date: 2026-09-10
-' Parameters:    wksOutputAll - Output_All worksheet
-' Returns:       None
-' Description:   Adds lightweight Data Validation input-message tooltips to the
-'                coupon frequency and bond calculation method columns. One rule
-'                per column keeps the runtime impact negligible even for large files.
-'-------------------------------------------------------------------------------
 Private Sub ApplyMappingTooltips(ByVal wksOutputAll As Excel.Worksheet)
     Const METHOD_NAME As String = "ApplyMappingTooltips"
     Dim errDescription As String
@@ -868,10 +1507,15 @@ Private Sub ApplyMappingTooltips(ByVal wksOutputAll As Excel.Worksheet)
         "8 - Actual/364" & vbLf & _
         "9 - Actual/252"
 
-    Set rngCouponFrequency = wksOutputAll.Range("F2:F" & CStr(lngLastRow))
-    Set rngBondCalc = wksOutputAll.Range("G2:G" & CStr(lngLastRow))
+    Set rngCouponFrequency = wksOutputAll.Range( _
+        wksOutputAll.Cells(2, COL_COUPON_FREQ), _
+        wksOutputAll.Cells(lngLastRow, COL_COUPON_FREQ))
+    Set rngBondCalc = wksOutputAll.Range( _
+        wksOutputAll.Cells(2, COL_BOND_CALC), _
+        wksOutputAll.Cells(lngLastRow, COL_BOND_CALC))
 
     With rngCouponFrequency.Validation
+        .Delete
         .Add Type:=xlValidateInputOnly
         .IgnoreBlank = True
         .InputTitle = "Coupon Frequency"
@@ -881,6 +1525,7 @@ Private Sub ApplyMappingTooltips(ByVal wksOutputAll As Excel.Worksheet)
     End With
 
     With rngBondCalc.Validation
+        .Delete
         .Add Type:=xlValidateInputOnly
         .IgnoreBlank = True
         .InputTitle = "Interest calculation type"
@@ -892,6 +1537,785 @@ Private Sub ApplyMappingTooltips(ByVal wksOutputAll As Excel.Worksheet)
 ExitPoint:
     Set rngCouponFrequency = Nothing
     Set rngBondCalc = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+Private Sub ApplyWeekendDateHighlighting(ByVal wksOutputAll As Excel.Worksheet)
+    Const METHOD_NAME As String = "ApplyWeekendDateHighlighting"
+    Dim arrColumns As Variant
+    Dim dblDate As Double
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngColumnIndex As Long
+    Dim lngLastRow As Long
+    Dim lngRow As Long
+    Dim lngWeekday As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    lngLastRow = wksOutputAll.Cells(wksOutputAll.Rows.Count, 1).End(xlUp).Row
+    If lngLastRow < 2 Then GoTo ExitPoint
+
+    arrColumns = Array(COL_LHS_NEXT, COL_LHS_LAST, COL_PAYMENT)
+
+    For lngColumnIndex = LBound(arrColumns) To UBound(arrColumns)
+        For lngRow = 2 To lngLastRow
+            If TryGetExcelDateSerial( _
+                wksOutputAll.Cells(lngRow, CLng(arrColumns(lngColumnIndex))).Value2, _
+                dblDate) Then
+
+                lngWeekday = Weekday(CDate(dblDate), vbSunday)
+                If lngWeekday = vbSaturday Then
+                    wksOutputAll.Cells( _
+                        lngRow, CLng(arrColumns(lngColumnIndex))).Interior.Color = _
+                        RGB(226, 239, 218)
+                ElseIf lngWeekday = vbSunday Then
+                    wksOutputAll.Cells( _
+                        lngRow, CLng(arrColumns(lngColumnIndex))).Interior.Color = _
+                        RGB(252, 228, 214)
+                End If
+            End If
+        Next lngRow
+    Next lngColumnIndex
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+Private Sub PopulateAccrualDiagnostics( _
+    ByRef arrResult As Variant, ByVal lngOutputRow As Long, _
+    ByVal arrLHS As Variant, ByVal lngLHSRow As Long, _
+    ByVal blnScheduleBuilt As Boolean, ByVal dblAccountingDate As Double, _
+    ByVal dblExpectedLast As Double, ByVal dblExpectedNext As Double, _
+    ByVal strProductReview As String, ByVal strStubFlag As String)
+
+    Const METHOD_NAME As String = "PopulateAccrualDiagnostics"
+    Dim blnHasLhsAccrued As Boolean
+    Dim blnHasLhsLast As Boolean
+    Dim blnHasLhsNext As Boolean
+    Dim blnHasQuantity As Boolean
+    Dim blnHasRate As Boolean
+    Dim blnModelCalculated As Boolean
+    Dim dblDailyAccrual As Double
+    Dim dblExpectedAccrual As Double
+    Dim dblExpectedAccrualLhs As Double
+    Dim dblLhsAccrued As Double
+    Dim dblLhsDaysValue As Double
+    Dim dblLhsLast As Double
+    Dim dblLhsNext As Double
+    Dim dblQuantity As Double
+    Dim dblRatePercent As Double
+    Dim dblYearFraction As Double
+    Dim dblYearFractionLhs As Double
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngAccrualDays As Long
+    Dim lngAccrualDaysLhs As Long
+    Dim lngBondCalc As Long
+    Dim lngCouponPeriodDays As Long
+    Dim lngCouponPeriodDaysLhs As Long
+    Dim lngFrequency As Long
+    Dim lngLhsDays As Long
+    Dim strCalcReason As String
+    Dim strMatch As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    arrResult(lngOutputRow, COL_ACCRUAL_CONVENTION) = _
+        GetAccrualConventionDescription(arrLHS(lngLHSRow, 10))
+    arrResult(lngOutputRow, COL_ACCRUAL_PERIOD) = _
+        GetAccrualPeriodDescription(arrLHS(lngLHSRow, 9))
+
+    If Not TryGetLongCode(arrLHS(lngLHSRow, 10), lngBondCalc) Then
+        arrResult(lngOutputRow, COL_ACCRUAL_MATCH) = "REVIEW"
+        arrResult(lngOutputRow, COL_ACCRUAL_RESULT) = _
+            "REVIEW - BOND CALC METHOD MISSING"
+        GoTo ExitPoint
+    End If
+
+    If lngBondCalc <> VERIFIED_ACCRUAL_METHOD Then
+        arrResult(lngOutputRow, COL_ACCRUAL_MATCH) = "REVIEW"
+        arrResult(lngOutputRow, COL_ACCRUAL_RESULT) = _
+            "REVIEW - METHOD NOT VERIFIED"
+        GoTo ExitPoint
+    End If
+
+    If Not blnScheduleBuilt Or dblExpectedLast <= 0 Or dblExpectedNext <= 0 Then
+        arrResult(lngOutputRow, COL_ACCRUAL_MATCH) = "REVIEW"
+        arrResult(lngOutputRow, COL_ACCRUAL_RESULT) = _
+            "REVIEW - EXPECTED COUPON SCHEDULE NOT AVAILABLE"
+        GoTo ExitPoint
+    End If
+
+    If UBound(arrLHS, 2) >= 19 Then
+        blnHasQuantity = TryGetDoubleValue(arrLHS(lngLHSRow, 19), dblQuantity)
+    End If
+    blnHasRate = TryGetDoubleValue(arrLHS(lngLHSRow, 12), dblRatePercent)
+    blnHasLhsAccrued = TryGetDoubleValue(arrLHS(lngLHSRow, 13), dblLhsAccrued)
+
+    If Not blnHasQuantity Or dblQuantity = 0 Then
+        arrResult(lngOutputRow, COL_ACCRUAL_MATCH) = "REVIEW"
+        arrResult(lngOutputRow, COL_ACCRUAL_RESULT) = _
+            "REVIEW - QUANTITY MISSING OR ZERO"
+        GoTo ExitPoint
+    End If
+
+    If Not blnHasRate Then
+        arrResult(lngOutputRow, COL_ACCRUAL_MATCH) = "REVIEW"
+        arrResult(lngOutputRow, COL_ACCRUAL_RESULT) = _
+            "REVIEW - INTEREST RATE MISSING"
+        GoTo ExitPoint
+    End If
+
+    If Not TryGetLongCode(arrLHS(lngLHSRow, 9), lngFrequency) Then
+        arrResult(lngOutputRow, COL_ACCRUAL_MATCH) = "REVIEW"
+        arrResult(lngOutputRow, COL_ACCRUAL_RESULT) = _
+            "REVIEW - COUPON FREQUENCY MISSING"
+        GoTo ExitPoint
+    End If
+
+    blnModelCalculated = TryCalculateMethod1Accrual( _
+        dblQuantity, dblRatePercent, lngFrequency, dblAccountingDate, _
+        dblExpectedLast, dblExpectedNext, lngAccrualDays, lngCouponPeriodDays, _
+        dblYearFraction, dblDailyAccrual, dblExpectedAccrual, strCalcReason)
+
+    If Not blnModelCalculated Then
+        arrResult(lngOutputRow, COL_ACCRUAL_MATCH) = "REVIEW"
+        arrResult(lngOutputRow, COL_ACCRUAL_RESULT) = strCalcReason
+        GoTo ExitPoint
+    End If
+
+    arrResult(lngOutputRow, COL_ACCRUAL_DAYS_SCHEDULE) = lngAccrualDays
+    arrResult(lngOutputRow, COL_COUPON_PERIOD_DAYS) = lngCouponPeriodDays
+    arrResult(lngOutputRow, COL_YEAR_FRACTION) = dblYearFraction
+    arrResult(lngOutputRow, COL_DAILY_ACCRUAL) = dblDailyAccrual
+    arrResult(lngOutputRow, COL_EXPECTED_ACCRUAL) = dblExpectedAccrual
+
+    If TryGetDoubleValue(arrLHS(lngLHSRow, 5), dblLhsDaysValue) Then
+        lngLhsDays = CLng(dblLhsDaysValue)
+        arrResult(lngOutputRow, COL_ACCRUAL_DAYS_DIFF) = lngLhsDays - lngAccrualDays
+    End If
+
+    blnHasLhsLast = TryGetExcelDateSerial(arrLHS(lngLHSRow, 3), dblLhsLast)
+    blnHasLhsNext = TryGetExcelDateSerial(arrLHS(lngLHSRow, 4), dblLhsNext)
+
+    If blnHasLhsLast And blnHasLhsNext Then
+        strCalcReason = vbNullString
+        If TryCalculateMethod1Accrual( _
+            dblQuantity, arrLHS(lngLHSRow, 12), lngFrequency, dblAccountingDate, _
+            dblLhsLast, dblLhsNext, lngAccrualDaysLhs, lngCouponPeriodDaysLhs, _
+            dblYearFractionLhs, dblDailyAccrual, dblExpectedAccrualLhs, strCalcReason) Then
+
+            arrResult(lngOutputRow, COL_ACCRUAL_DAYS_LHS) = lngAccrualDaysLhs
+            arrResult(lngOutputRow, COL_EXPECTED_ACCRUAL_LHS) = dblExpectedAccrualLhs
+        End If
+    End If
+
+    If Not blnHasLhsAccrued Then
+        arrResult(lngOutputRow, COL_ACCRUAL_MATCH) = "REVIEW"
+        arrResult(lngOutputRow, COL_ACCRUAL_RESULT) = _
+            "REVIEW - LHS ACCRUED INTEREST MISSING"
+        GoTo ExitPoint
+    End If
+
+    arrResult(lngOutputRow, COL_LHS_ACCRUED) = dblLhsAccrued
+    arrResult(lngOutputRow, COL_ACCRUAL_DIFF) = dblLhsAccrued - dblExpectedAccrual
+
+    If Abs(dblExpectedAccrual) > 0.0000001 Then
+        arrResult(lngOutputRow, COL_ACCRUAL_DIFF_PCT) = _
+            (dblLhsAccrued - dblExpectedAccrual) / dblExpectedAccrual
+    End If
+
+    If Abs(dblLhsAccrued - dblExpectedAccrual) <= ACCRUAL_MATCH_TOLERANCE Then
+        strMatch = "TRUE"
+    Else
+        strMatch = "FALSE"
+    End If
+
+    arrResult(lngOutputRow, COL_ACCRUAL_MATCH) = strMatch
+    arrResult(lngOutputRow, COL_ACCRUAL_RESULT) = BuildAccrualValidationResult( _
+        strMatch, strProductReview, strStubFlag)
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError( _
+        CLASS_NAME, METHOD_NAME, errNumber, errDescription, _
+        "lngLHSRow", lngLHSRow)
+    GoTo ExitPoint
+End Sub
+
+Private Function TryCalculateMethod1Accrual( _
+    ByVal dblQuantity As Double, ByVal vRatePercent As Variant, _
+    ByVal lngFrequency As Long, ByVal dblAccountingDate As Double, _
+    ByVal dblPeriodLast As Double, ByVal dblPeriodNext As Double, _
+    ByRef lngAccrualDays As Long, ByRef lngCouponPeriodDays As Long, _
+    ByRef dblYearFraction As Double, ByRef dblDailyAccrual As Double, _
+    ByRef dblExpectedAccrual As Double, ByRef strReason As String) As Boolean
+
+    Const METHOD_NAME As String = "TryCalculateMethod1Accrual"
+    Dim dblCouponFactor As Double
+    Dim dblCouponAmount As Double
+    Dim dblRatePercent As Double
+    Dim errDescription As String
+    Dim errNumber As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    lngAccrualDays = 0
+    lngCouponPeriodDays = 0
+    dblYearFraction = 0
+    dblDailyAccrual = 0
+    dblExpectedAccrual = 0
+    strReason = vbNullString
+
+    If dblAccountingDate <= 0 Or dblPeriodLast <= 0 Or dblPeriodNext <= 0 Then
+        strReason = "REVIEW - ACCRUAL DATES MISSING"
+        GoTo ExitPoint
+    End If
+
+    If Not TryGetDoubleValue(vRatePercent, dblRatePercent) Then
+        strReason = "REVIEW - INTEREST RATE MISSING"
+        GoTo ExitPoint
+    End If
+
+    If Not TryGetCouponFrequencyFactor(lngFrequency, dblCouponFactor) Then
+        strReason = "REVIEW - ACCRUAL FREQUENCY NOT SUPPORTED"
+        GoTo ExitPoint
+    End If
+
+    lngCouponPeriodDays = CLng(Int(dblPeriodNext)) - CLng(Int(dblPeriodLast))
+    If lngCouponPeriodDays <= 0 Then
+        strReason = "REVIEW - INVALID COUPON PERIOD"
+        GoTo ExitPoint
+    End If
+
+    lngAccrualDays = CLng(Int(dblAccountingDate)) - CLng(Int(dblPeriodLast)) + 1
+    If lngAccrualDays < 0 Or lngAccrualDays > lngCouponPeriodDays Then
+        strReason = "REVIEW - ACCOUNTING DATE OUTSIDE COUPON PERIOD"
+        GoTo ExitPoint
+    End If
+
+    ' LHS stores the rate in percentage points, e.g. 4.467 means 4.467%.
+    dblCouponAmount = dblQuantity * (dblRatePercent / 100#) * dblCouponFactor
+    dblYearFraction = dblCouponFactor * CDbl(lngAccrualDays) / _
+        CDbl(lngCouponPeriodDays)
+    dblDailyAccrual = dblCouponAmount / CDbl(lngCouponPeriodDays)
+    dblExpectedAccrual = dblQuantity * (dblRatePercent / 100#) * dblYearFraction
+    TryCalculateMethod1Accrual = True
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+Private Function TryGetCouponFrequencyFactor( _
+    ByVal lngFrequency As Long, ByRef dblFactor As Double) As Boolean
+
+    Const METHOD_NAME As String = "TryGetCouponFrequencyFactor"
+    Dim errDescription As String
+    Dim errNumber As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    dblFactor = 0
+
+    Select Case lngFrequency
+        Case 1, 5
+            dblFactor = 1# / 12#
+        Case 2, 6
+            dblFactor = 1# / 4#
+        Case 3, 7
+            dblFactor = 1# / 2#
+        Case 4, 8
+            dblFactor = 1#
+        Case Else
+            GoTo ExitPoint
+    End Select
+
+    TryGetCouponFrequencyFactor = True
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+Private Function GetAccrualConventionDescription(ByVal vMethod As Variant) As String
+    Const METHOD_NAME As String = "GetAccrualConventionDescription"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngMethod As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If Not TryGetLongCode(vMethod, lngMethod) Then
+        GetAccrualConventionDescription = "(missing)"
+        GoTo ExitPoint
+    End If
+
+    Select Case lngMethod
+        Case 1: GetAccrualConventionDescription = "1 - 365-6/365"
+        Case 2: GetAccrualConventionDescription = "2 - 365-6/360"
+        Case 3: GetAccrualConventionDescription = "3 - 360/360"
+        Case 4: GetAccrualConventionDescription = "4 - 360/365"
+        Case 5: GetAccrualConventionDescription = "5 - 365-6/365-6"
+        Case 6: GetAccrualConventionDescription = "6 - 365-6/365-6 = Civil"
+        Case 7: GetAccrualConventionDescription = "7 - 360/360 US"
+        Case 8: GetAccrualConventionDescription = "8 - Actual/364"
+        Case 9: GetAccrualConventionDescription = "9 - Actual/252"
+        Case Else: GetAccrualConventionDescription = CStr(lngMethod) & " - UNKNOWN"
+    End Select
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+Private Function GetAccrualPeriodDescription(ByVal vFrequency As Variant) As String
+    Const METHOD_NAME As String = "GetAccrualPeriodDescription"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngFrequency As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If Not TryGetLongCode(vFrequency, lngFrequency) Then
+        GetAccrualPeriodDescription = "(missing)"
+        GoTo ExitPoint
+    End If
+
+    Select Case lngFrequency
+        Case 1: GetAccrualPeriodDescription = "End of Month"
+        Case 2: GetAccrualPeriodDescription = "End of Quarter"
+        Case 3: GetAccrualPeriodDescription = "End of half-year"
+        Case 4: GetAccrualPeriodDescription = "End of Year"
+        Case 5: GetAccrualPeriodDescription = "Monthly"
+        Case 6: GetAccrualPeriodDescription = "Quarterly"
+        Case 7: GetAccrualPeriodDescription = "Half-year"
+        Case 8: GetAccrualPeriodDescription = "Year"
+        Case 9: GetAccrualPeriodDescription = "Maturity"
+        Case Else: GetAccrualPeriodDescription = CStr(lngFrequency) & " - UNKNOWN"
+    End Select
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+Private Function BuildAccrualValidationResult( _
+    ByVal strMatch As String, ByVal strProductReview As String, _
+    ByVal strStubFlag As String) As String
+
+    Const METHOD_NAME As String = "BuildAccrualValidationResult"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strReview As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strReview = JoinFlags(strProductReview, strStubFlag)
+
+    If Len(strReview) > 0 Then
+        If UCase$(strMatch) = "TRUE" Then
+            BuildAccrualValidationResult = strReview & " / ACCRUAL MATCH"
+        Else
+            BuildAccrualValidationResult = strReview & " / ACCRUAL MISMATCH"
+        End If
+    ElseIf UCase$(strMatch) = "TRUE" Then
+        BuildAccrualValidationResult = "OK - METHOD 1 MODEL"
+    Else
+        BuildAccrualValidationResult = "ACCRUAL MISMATCH - METHOD 1 MODEL"
+    End If
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+Private Function TryGetDoubleValue( _
+    ByVal vValue As Variant, ByRef dblValue As Double) As Boolean
+
+    Const METHOD_NAME As String = "TryGetDoubleValue"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strValue As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    dblValue = 0
+    If IsError(vValue) Or IsEmpty(vValue) Then GoTo ExitPoint
+
+    If IsNumeric(vValue) Then
+        dblValue = CDbl(vValue)
+        TryGetDoubleValue = True
+        GoTo ExitPoint
+    End If
+
+    strValue = Trim$(CStr(vValue))
+    If Len(strValue) = 0 Then GoTo ExitPoint
+    If IsNumeric(strValue) Then
+        dblValue = CDbl(strValue)
+        TryGetDoubleValue = True
+    End If
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+Private Sub SetOutputAllNumberFormats(ByVal wksOutputAll As Excel.Worksheet)
+    Const METHOD_NAME As String = "SetOutputAllNumberFormats"
+    Dim arrDateColumns As Variant
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngIndex As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    arrDateColumns = Array( _
+        COL_ACCOUNTING_DATE, COL_GENERATION_DATE, COL_START_DATE, COL_FIRST_COUPON, _
+        COL_MATURITY, COL_VALUE_DATE, COL_LHS_NEXT, COL_EXPECTED_NEXT, _
+        COL_LHS_LAST, COL_EXPECTED_LAST, COL_PAYMENT, COL_LATEST_PAYMENT)
+
+    For lngIndex = LBound(arrDateColumns) To UBound(arrDateColumns)
+        wksOutputAll.Columns(CLng(arrDateColumns(lngIndex))).NumberFormat = "dd/mm/yyyy"
+    Next lngIndex
+
+    wksOutputAll.Columns(COL_PAYMENT_SHIFT).NumberFormat = "0"
+    wksOutputAll.Columns(COL_PAYMENT_DIFF).NumberFormat = "0"
+    wksOutputAll.Columns(COL_QUANTITY).NumberFormat = "#,##0.00"
+    wksOutputAll.Columns(COL_INTEREST_RATE).NumberFormat = "0.000000"
+    wksOutputAll.Columns(COL_ACCRUAL_DAYS_SCHEDULE).NumberFormat = "0"
+    wksOutputAll.Columns(COL_ACCRUAL_DAYS_DIFF).NumberFormat = "0"
+    wksOutputAll.Columns(COL_ACCRUAL_DAYS_LHS).NumberFormat = "0"
+    wksOutputAll.Columns(COL_COUPON_PERIOD_DAYS).NumberFormat = "0"
+    wksOutputAll.Columns(COL_YEAR_FRACTION).NumberFormat = "0.00000000"
+    wksOutputAll.Columns(COL_DAILY_ACCRUAL).NumberFormat = "#,##0.0000"
+    wksOutputAll.Columns(COL_EXPECTED_ACCRUAL).NumberFormat = "#,##0.00"
+    wksOutputAll.Columns(COL_EXPECTED_ACCRUAL_LHS).NumberFormat = "#,##0.00"
+    wksOutputAll.Columns(COL_LHS_ACCRUED).NumberFormat = "#,##0.00"
+    wksOutputAll.Columns(COL_ACCRUAL_DIFF).NumberFormat = "#,##0.00"
+    wksOutputAll.Columns(COL_ACCRUAL_DIFF_PCT).NumberFormat = "0.0000%"
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+Private Sub BuildAccrualAnalysisSheet( _
+    ByVal wksAnalysis As Excel.Worksheet, ByVal arrOutputAll As Variant)
+
+    Const METHOD_NAME As String = "BuildAccrualAnalysisSheet"
+    Dim arrGtiKeys As Variant
+    Dim arrMethodSummary() As Variant
+    Dim arrGtiSummary() As Variant
+    Dim chtObject As Excel.ChartObject
+    Dim dictGtiDiffCount As Object
+    Dim dictGtiDiffSum As Object
+    Dim dictGtiMismatch As Object
+    Dim dictGtiReview As Object
+    Dim dictGtiTotal As Object
+    Dim dictMethodDiffCount As Object
+    Dim dictMethodDiffSum As Object
+    Dim dictMethodFalse As Object
+    Dim dictMethodReview As Object
+    Dim dictMethodTotal As Object
+    Dim dictMethodTrue As Object
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngCalculated As Long
+    Dim lngChartRows As Long
+    Dim lngFalseTotal As Long
+    Dim lngGtiRows As Long
+    Dim lngIndex As Long
+    Dim lngMethodRows As Long
+    Dim lngReviewTotal As Long
+    Dim lngRow As Long
+    Dim lngTrueTotal As Long
+    Dim strGti As String
+    Dim strMatch As String
+    Dim strMethod As String
+    Dim vKey As Variant
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set dictMethodTotal = CreateObject("Scripting.Dictionary")
+    Set dictMethodTrue = CreateObject("Scripting.Dictionary")
+    Set dictMethodFalse = CreateObject("Scripting.Dictionary")
+    Set dictMethodReview = CreateObject("Scripting.Dictionary")
+    Set dictMethodDiffSum = CreateObject("Scripting.Dictionary")
+    Set dictMethodDiffCount = CreateObject("Scripting.Dictionary")
+    Set dictGtiTotal = CreateObject("Scripting.Dictionary")
+    Set dictGtiMismatch = CreateObject("Scripting.Dictionary")
+    Set dictGtiReview = CreateObject("Scripting.Dictionary")
+    Set dictGtiDiffSum = CreateObject("Scripting.Dictionary")
+    Set dictGtiDiffCount = CreateObject("Scripting.Dictionary")
+
+    dictMethodTotal.CompareMode = vbTextCompare
+    dictMethodTrue.CompareMode = vbTextCompare
+    dictMethodFalse.CompareMode = vbTextCompare
+    dictMethodReview.CompareMode = vbTextCompare
+    dictMethodDiffSum.CompareMode = vbTextCompare
+    dictMethodDiffCount.CompareMode = vbTextCompare
+    dictGtiTotal.CompareMode = vbTextCompare
+    dictGtiMismatch.CompareMode = vbTextCompare
+    dictGtiReview.CompareMode = vbTextCompare
+    dictGtiDiffSum.CompareMode = vbTextCompare
+    dictGtiDiffCount.CompareMode = vbTextCompare
+
+    For lngRow = 2 To UBound(arrOutputAll, 1)
+        strMethod = Trim$(CStr(arrOutputAll(lngRow, COL_ACCRUAL_CONVENTION)))
+        If Len(strMethod) = 0 Then strMethod = "(missing)"
+
+        strGti = Trim$(CStr(arrOutputAll(lngRow, COL_GTI_NAME)))
+        If Len(strGti) = 0 Then strGti = "(blank GTI NAME)"
+
+        strMatch = UCase$(Trim$(CStr(arrOutputAll(lngRow, COL_ACCRUAL_MATCH))))
+
+        Call IncrementDictionaryCount(dictMethodTotal, strMethod)
+        Call IncrementDictionaryCount(dictGtiTotal, strGti)
+
+        Select Case strMatch
+            Case "TRUE"
+                Call IncrementDictionaryCount(dictMethodTrue, strMethod)
+                lngTrueTotal = lngTrueTotal + 1
+                lngCalculated = lngCalculated + 1
+            Case "FALSE"
+                Call IncrementDictionaryCount(dictMethodFalse, strMethod)
+                Call IncrementDictionaryCount(dictGtiMismatch, strGti)
+                lngFalseTotal = lngFalseTotal + 1
+                lngCalculated = lngCalculated + 1
+            Case Else
+                Call IncrementDictionaryCount(dictMethodReview, strMethod)
+                Call IncrementDictionaryCount(dictGtiReview, strGti)
+                lngReviewTotal = lngReviewTotal + 1
+        End Select
+
+        If IsNumeric(arrOutputAll(lngRow, COL_ACCRUAL_DIFF)) Then
+            Call AddDictionaryDouble( _
+                dictMethodDiffSum, strMethod, _
+                Abs(CDbl(arrOutputAll(lngRow, COL_ACCRUAL_DIFF))))
+            Call IncrementDictionaryCount(dictMethodDiffCount, strMethod)
+
+            Call AddDictionaryDouble( _
+                dictGtiDiffSum, strGti, _
+                Abs(CDbl(arrOutputAll(lngRow, COL_ACCRUAL_DIFF))))
+            Call IncrementDictionaryCount(dictGtiDiffCount, strGti)
+        End If
+    Next lngRow
+
+    wksAnalysis.Range("A1").Value2 = "Accrual validation overview"
+    wksAnalysis.Range("A2").Value2 = "Output_All rows"
+    wksAnalysis.Range("B2").Value2 = UBound(arrOutputAll, 1) - 1
+    wksAnalysis.Range("A3").Value2 = "Method 1 rows calculated"
+    wksAnalysis.Range("B3").Value2 = lngCalculated
+    wksAnalysis.Range("A4").Value2 = "Accrual matches"
+    wksAnalysis.Range("B4").Value2 = lngTrueTotal
+    wksAnalysis.Range("A5").Value2 = "Accrual mismatches"
+    wksAnalysis.Range("B5").Value2 = lngFalseTotal
+    wksAnalysis.Range("A6").Value2 = "Review / unverified"
+    wksAnalysis.Range("B6").Value2 = lngReviewTotal
+    wksAnalysis.Range("A7").Value2 = "Match tolerance"
+    wksAnalysis.Range("B7").Value2 = ACCRUAL_MATCH_TOLERANCE
+
+    wksAnalysis.Range("A9").Value2 = "Accrual Convention"
+    wksAnalysis.Range("B9").Value2 = "Rows"
+    wksAnalysis.Range("C9").Value2 = "TRUE"
+    wksAnalysis.Range("D9").Value2 = "FALSE"
+    wksAnalysis.Range("E9").Value2 = "Review"
+    wksAnalysis.Range("F9").Value2 = "Average absolute accrual div"
+
+    lngMethodRows = dictMethodTotal.Count
+    If lngMethodRows > 0 Then
+        ReDim arrMethodSummary(1 To lngMethodRows, 1 To 6)
+        lngIndex = 0
+
+        For Each vKey In dictMethodTotal.Keys
+            lngIndex = lngIndex + 1
+            arrMethodSummary(lngIndex, 1) = CStr(vKey)
+            arrMethodSummary(lngIndex, 2) = GetDictionaryCount(dictMethodTotal, CStr(vKey))
+            arrMethodSummary(lngIndex, 3) = GetDictionaryCount(dictMethodTrue, CStr(vKey))
+            arrMethodSummary(lngIndex, 4) = GetDictionaryCount(dictMethodFalse, CStr(vKey))
+            arrMethodSummary(lngIndex, 5) = GetDictionaryCount(dictMethodReview, CStr(vKey))
+
+            If GetDictionaryCount(dictMethodDiffCount, CStr(vKey)) > 0 Then
+                arrMethodSummary(lngIndex, 6) = _
+                    GetDictionaryDouble(dictMethodDiffSum, CStr(vKey)) / _
+                    GetDictionaryCount(dictMethodDiffCount, CStr(vKey))
+            End If
+        Next vKey
+
+        wksAnalysis.Range("A10").Resize(lngMethodRows, 6).Value2 = arrMethodSummary
+        wksAnalysis.Range("F10").Resize(lngMethodRows, 1).NumberFormat = "#,##0.00"
+    End If
+
+    wksAnalysis.Range("H9").Value2 = "GTI NAME"
+    wksAnalysis.Range("I9").Value2 = "Rows"
+    wksAnalysis.Range("J9").Value2 = "Accrual mismatch count"
+    wksAnalysis.Range("K9").Value2 = "Review count"
+    wksAnalysis.Range("L9").Value2 = "Average absolute accrual div"
+
+    arrGtiKeys = BuildCombinedThreeKeyArray( _
+        dictGtiMismatch, dictGtiReview, dictGtiTotal)
+
+    If Not IsEmpty(arrGtiKeys) Then
+        Call SortKeysByThreeCounts( _
+            arrGtiKeys, dictGtiMismatch, dictGtiReview, dictGtiTotal)
+        lngGtiRows = UBound(arrGtiKeys) - LBound(arrGtiKeys) + 1
+        ReDim arrGtiSummary(1 To lngGtiRows, 1 To 5)
+
+        For lngIndex = LBound(arrGtiKeys) To UBound(arrGtiKeys)
+            strGti = CStr(arrGtiKeys(lngIndex))
+            arrGtiSummary(lngIndex - LBound(arrGtiKeys) + 1, 1) = strGti
+            arrGtiSummary(lngIndex - LBound(arrGtiKeys) + 1, 2) = _
+                GetDictionaryCount(dictGtiTotal, strGti)
+            arrGtiSummary(lngIndex - LBound(arrGtiKeys) + 1, 3) = _
+                GetDictionaryCount(dictGtiMismatch, strGti)
+            arrGtiSummary(lngIndex - LBound(arrGtiKeys) + 1, 4) = _
+                GetDictionaryCount(dictGtiReview, strGti)
+
+            If GetDictionaryCount(dictGtiDiffCount, strGti) > 0 Then
+                arrGtiSummary(lngIndex - LBound(arrGtiKeys) + 1, 5) = _
+                    GetDictionaryDouble(dictGtiDiffSum, strGti) / _
+                    GetDictionaryCount(dictGtiDiffCount, strGti)
+            End If
+        Next lngIndex
+
+        wksAnalysis.Range("H10").Resize(lngGtiRows, 5).Value2 = arrGtiSummary
+        wksAnalysis.Range("L10").Resize(lngGtiRows, 1).NumberFormat = "#,##0.00"
+
+        For lngIndex = LBound(arrGtiKeys) To UBound(arrGtiKeys)
+            If GetDictionaryCount( _
+                dictGtiMismatch, CStr(arrGtiKeys(lngIndex))) > 0 Then
+                lngChartRows = lngChartRows + 1
+                If lngChartRows = 15 Then Exit For
+            Else
+                Exit For
+            End If
+        Next lngIndex
+
+        If lngChartRows > 0 Then
+            Set chtObject = wksAnalysis.ChartObjects.Add( _
+                Left:=wksAnalysis.Range("N2").Left, _
+                Top:=wksAnalysis.Range("N2").Top, Width:=650, Height:=380)
+
+            With chtObject.Chart
+                .ChartType = xlBarClustered
+                .SeriesCollection.NewSeries
+                With .SeriesCollection(1)
+                    .Name = "Accrual mismatch count"
+                    .XValues = wksAnalysis.Range( _
+                        wksAnalysis.Cells(10, 8), _
+                        wksAnalysis.Cells(9 + lngChartRows, 8))
+                    .Values = wksAnalysis.Range( _
+                        wksAnalysis.Cells(10, 10), _
+                        wksAnalysis.Cells(9 + lngChartRows, 10))
+                    .ApplyDataLabels
+                End With
+                .HasTitle = True
+                .ChartTitle.Text = "Accrual mismatches by GTI Name - top 15"
+                .HasLegend = False
+            End With
+        End If
+    End If
+
+    wksAnalysis.Range("A1:F1").Font.Bold = True
+    wksAnalysis.Range("A9:F9").Font.Bold = True
+    wksAnalysis.Range("H9:L9").Font.Bold = True
+
+ExitPoint:
+    Set chtObject = Nothing
+    Set dictMethodTotal = Nothing
+    Set dictMethodTrue = Nothing
+    Set dictMethodFalse = Nothing
+    Set dictMethodReview = Nothing
+    Set dictMethodDiffSum = Nothing
+    Set dictMethodDiffCount = Nothing
+    Set dictGtiTotal = Nothing
+    Set dictGtiMismatch = Nothing
+    Set dictGtiReview = Nothing
+    Set dictGtiDiffSum = Nothing
+    Set dictGtiDiffCount = Nothing
 
     If errNumber <> 0 Then
         Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
@@ -905,44 +2329,329 @@ ErrHandler:
     GoTo ExitPoint
 End Sub
 
- '-------------------------------------------------------------------------------
-' Author:        Pawel Ligezka
-' Creation date: 2026-09-10
-' Parameters:    wksOutputAll - Output_All worksheet
-' Returns:       None
-' Description:   Highlights weekend dates in Next Coupon Date, Last Coupon Date
-'                and Neolink Payment Date. Saturday and Sunday use distinct fills.
-'-------------------------------------------------------------------------------
-Private Sub ApplyWeekendDateHighlighting(ByVal wksOutputAll As Excel.Worksheet)
-    Const METHOD_NAME As String = "ApplyWeekendDateHighlighting"
+Private Sub AddDictionaryDouble( _
+    ByVal dictTarget As Object, ByVal strKey As String, ByVal dblValue As Double)
+
+    Const METHOD_NAME As String = "AddDictionaryDouble"
     Dim errDescription As String
     Dim errNumber As Long
-    Dim lngLastRow As Long
-    Dim rngWeekendDates As Excel.Range
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    lngLastRow = wksOutputAll.Cells(wksOutputAll.Rows.Count, 1).End(xlUp).Row
-    If lngLastRow < 2 Then GoTo ExitPoint
-
-    Set rngWeekendDates = wksOutputAll.Range("I2:K" & CStr(lngLastRow))
-
-    ' Simple formulas without list separators keep the rules locale-safe.
-    With rngWeekendDates.FormatConditions.Add( _
-        Type:=xlExpression, Formula1:="=ISNUMBER(I2)*(WEEKDAY(I2)=7)")
-        .Interior.Color = RGB(226, 239, 218)
-        .StopIfTrue = True
-    End With
-
-    With rngWeekendDates.FormatConditions.Add( _
-        Type:=xlExpression, Formula1:="=ISNUMBER(I2)*(WEEKDAY(I2)=1)")
-        .Interior.Color = RGB(252, 228, 214)
-        .StopIfTrue = True
-    End With
+    If dictTarget.Exists(strKey) Then
+        dictTarget(strKey) = CDbl(dictTarget(strKey)) + dblValue
+    Else
+        dictTarget.Add strKey, dblValue
+    End If
 
 ExitPoint:
-    Set rngWeekendDates = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
 
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+Private Function GetDictionaryDouble( _
+    ByVal dictTarget As Object, ByVal strKey As String) As Double
+
+    Const METHOD_NAME As String = "GetDictionaryDouble"
+    Dim errDescription As String
+    Dim errNumber As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If dictTarget.Exists(strKey) Then
+        GetDictionaryDouble = CDbl(dictTarget(strKey))
+    End If
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+Private Sub BuildAnalysisSheet( _
+    ByVal wksAnalysis As Excel.Worksheet, ByVal arrOutputAll As Variant)
+
+    Const METHOD_NAME As String = "BuildAnalysisSheet"
+    Dim arrKeys As Variant
+    Dim arrSummary() As Variant
+    Dim chtObject As Excel.ChartObject
+    Dim dictConfirmed As Object
+    Dim dictRawMismatch As Object
+    Dim dictReview As Object
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngChartRows As Long
+    Dim lngConfirmedTotal As Long
+    Dim lngIndex As Long
+    Dim lngRawMismatchTotal As Long
+    Dim lngReviewTotal As Long
+    Dim lngRow As Long
+    Dim lngSummaryRows As Long
+    Dim strGti As String
+    Dim strResult As String
+    Dim strScheduleMatch As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set dictRawMismatch = CreateObject("Scripting.Dictionary")
+    Set dictConfirmed = CreateObject("Scripting.Dictionary")
+    Set dictReview = CreateObject("Scripting.Dictionary")
+    dictRawMismatch.CompareMode = vbTextCompare
+    dictConfirmed.CompareMode = vbTextCompare
+    dictReview.CompareMode = vbTextCompare
+
+    For lngRow = 2 To UBound(arrOutputAll, 1)
+        strGti = Trim$(CStr(arrOutputAll(lngRow, COL_GTI_NAME)))
+        If Len(strGti) = 0 Then strGti = "(blank GTI NAME)"
+
+        strScheduleMatch = UCase$(Trim$(CStr( _
+            arrOutputAll(lngRow, COL_SCHEDULE_MATCH))))
+        strResult = UCase$(Trim$(CStr( _
+            arrOutputAll(lngRow, COL_VALIDATION_RESULT))))
+
+        If strScheduleMatch = "FALSE" Then
+            Call IncrementDictionaryCount(dictRawMismatch, strGti)
+            lngRawMismatchTotal = lngRawMismatchTotal + 1
+        End If
+
+        If strResult = "LHS LAST COUPON MISMATCH" Then
+            Call IncrementDictionaryCount(dictConfirmed, strGti)
+            lngConfirmedTotal = lngConfirmedTotal + 1
+        ElseIf Left$(strResult, 6) = "REVIEW" Then
+            Call IncrementDictionaryCount(dictReview, strGti)
+            lngReviewTotal = lngReviewTotal + 1
+        End If
+    Next lngRow
+
+    wksAnalysis.Range("A1").Value2 = "Schedule validation overview"
+    wksAnalysis.Range("A2").Value2 = "Raw schedule mismatches"
+    wksAnalysis.Range("B2").Value2 = lngRawMismatchTotal
+    wksAnalysis.Range("A3").Value2 = "Confirmed simple-product mismatches"
+    wksAnalysis.Range("B3").Value2 = lngConfirmedTotal
+    wksAnalysis.Range("A4").Value2 = "Review / complex / stub cases"
+    wksAnalysis.Range("B4").Value2 = lngReviewTotal
+
+    wksAnalysis.Range("A6").Value2 = "GTI NAME"
+    wksAnalysis.Range("B6").Value2 = "Raw schedule mismatch count"
+    wksAnalysis.Range("C6").Value2 = "Confirmed simple mismatch count"
+    wksAnalysis.Range("D6").Value2 = "Review count"
+
+    arrKeys = BuildCombinedThreeKeyArray(dictRawMismatch, dictConfirmed, dictReview)
+    If Not IsEmpty(arrKeys) Then
+        Call SortKeysByThreeCounts(arrKeys, dictRawMismatch, dictConfirmed, dictReview)
+        lngSummaryRows = UBound(arrKeys) - LBound(arrKeys) + 1
+        ReDim arrSummary(1 To lngSummaryRows, 1 To 4)
+
+        For lngIndex = LBound(arrKeys) To UBound(arrKeys)
+            arrSummary(lngIndex - LBound(arrKeys) + 1, 1) = CStr(arrKeys(lngIndex))
+            arrSummary(lngIndex - LBound(arrKeys) + 1, 2) = _
+                GetDictionaryCount(dictRawMismatch, CStr(arrKeys(lngIndex)))
+            arrSummary(lngIndex - LBound(arrKeys) + 1, 3) = _
+                GetDictionaryCount(dictConfirmed, CStr(arrKeys(lngIndex)))
+            arrSummary(lngIndex - LBound(arrKeys) + 1, 4) = _
+                GetDictionaryCount(dictReview, CStr(arrKeys(lngIndex)))
+        Next lngIndex
+
+        wksAnalysis.Range("A7").Resize(lngSummaryRows, 4).Value2 = arrSummary
+
+        If lngRawMismatchTotal > 0 Then
+            For lngIndex = LBound(arrKeys) To UBound(arrKeys)
+                If GetDictionaryCount(dictRawMismatch, CStr(arrKeys(lngIndex))) > 0 Then
+                    lngChartRows = lngChartRows + 1
+                    If lngChartRows = 15 Then Exit For
+                Else
+                    Exit For
+                End If
+            Next lngIndex
+
+            If lngChartRows > 0 Then
+                Set chtObject = wksAnalysis.ChartObjects.Add( _
+                    Left:=wksAnalysis.Range("F2").Left, _
+                    Top:=wksAnalysis.Range("F2").Top, Width:=650, Height:=380)
+
+                With chtObject.Chart
+                    .ChartType = xlBarClustered
+                    .SetSourceData Source:=wksAnalysis.Range( _
+                        wksAnalysis.Cells(6, 1), _
+                        wksAnalysis.Cells(6 + lngChartRows, 2))
+                    .HasTitle = True
+                    .ChartTitle.Text = "Raw schedule mismatches by GTI Name - top 15"
+                    .HasLegend = False
+                    .SeriesCollection(1).ApplyDataLabels
+                End With
+            End If
+        End If
+    End If
+
+    wksAnalysis.Range("A1:D1").Font.Bold = True
+    wksAnalysis.Range("A6:D6").Font.Bold = True
+
+ExitPoint:
+    Set chtObject = Nothing
+    Set dictRawMismatch = Nothing
+    Set dictConfirmed = Nothing
+    Set dictReview = Nothing
+
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+Private Sub IncrementDictionaryCount(ByVal dictTarget As Object, ByVal strKey As String)
+    Const METHOD_NAME As String = "IncrementDictionaryCount"
+    Dim errDescription As String
+    Dim errNumber As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If dictTarget.Exists(strKey) Then
+        dictTarget(strKey) = CLng(dictTarget(strKey)) + 1
+    Else
+        dictTarget.Add strKey, 1&
+    End If
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+Private Function GetDictionaryCount(ByVal dictTarget As Object, ByVal strKey As String) As Long
+    Const METHOD_NAME As String = "GetDictionaryCount"
+    Dim errDescription As String
+    Dim errNumber As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If dictTarget.Exists(strKey) Then
+        GetDictionaryCount = CLng(dictTarget(strKey))
+    End If
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+Private Function BuildCombinedThreeKeyArray( _
+    ByVal dictFirst As Object, ByVal dictSecond As Object, _
+    ByVal dictThird As Object) As Variant
+
+    Const METHOD_NAME As String = "BuildCombinedThreeKeyArray"
+    Dim arrKeys() As Variant
+    Dim dictAll As Object
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngIndex As Long
+    Dim vKey As Variant
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set dictAll = CreateObject("Scripting.Dictionary")
+    dictAll.CompareMode = vbTextCompare
+
+    For Each vKey In dictFirst.Keys
+        If Not dictAll.Exists(CStr(vKey)) Then dictAll.Add CStr(vKey), True
+    Next vKey
+    For Each vKey In dictSecond.Keys
+        If Not dictAll.Exists(CStr(vKey)) Then dictAll.Add CStr(vKey), True
+    Next vKey
+    For Each vKey In dictThird.Keys
+        If Not dictAll.Exists(CStr(vKey)) Then dictAll.Add CStr(vKey), True
+    Next vKey
+
+    If dictAll.Count > 0 Then
+        ReDim arrKeys(0 To dictAll.Count - 1)
+        For Each vKey In dictAll.Keys
+            arrKeys(lngIndex) = CStr(vKey)
+            lngIndex = lngIndex + 1
+        Next vKey
+        BuildCombinedThreeKeyArray = arrKeys
+    End If
+
+ExitPoint:
+    Set dictAll = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+Private Sub SortKeysByThreeCounts( _
+    ByRef arrKeys As Variant, ByVal dictRawMismatch As Object, _
+    ByVal dictConfirmed As Object, ByVal dictReview As Object)
+
+    Const METHOD_NAME As String = "SortKeysByThreeCounts"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngI As Long
+    Dim lngJ As Long
+    Dim lngLeft As Long
+    Dim lngRight As Long
+    Dim strTemp As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    For lngI = LBound(arrKeys) To UBound(arrKeys) - 1
+        For lngJ = lngI + 1 To UBound(arrKeys)
+            lngLeft = GetDictionaryCount(dictRawMismatch, CStr(arrKeys(lngI))) * 1000000 + _
+                GetDictionaryCount(dictConfirmed, CStr(arrKeys(lngI))) * 1000 + _
+                GetDictionaryCount(dictReview, CStr(arrKeys(lngI)))
+            lngRight = GetDictionaryCount(dictRawMismatch, CStr(arrKeys(lngJ))) * 1000000 + _
+                GetDictionaryCount(dictConfirmed, CStr(arrKeys(lngJ))) * 1000 + _
+                GetDictionaryCount(dictReview, CStr(arrKeys(lngJ)))
+
+            If lngRight > lngLeft Then
+                strTemp = CStr(arrKeys(lngI))
+                arrKeys(lngI) = arrKeys(lngJ)
+                arrKeys(lngJ) = strTemp
+            End If
+        Next lngJ
+    Next lngI
+
+ExitPoint:
     If errNumber <> 0 Then
         Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
     End If
