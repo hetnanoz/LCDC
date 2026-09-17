@@ -7,6 +7,7 @@ Private Const LOOKUP_SEPARATOR As String = "|"
 Private Const PAYMENT_PREVIOUS_WINDOW_DAYS As Long = 10
 Private Const VERIFIED_ACCRUAL_METHOD As Long = 1
 Private Const ACCRUAL_MATCH_TOLERANCE As Double = 0.05
+Private Const CURRENT_FACE_MATCH_TOLERANCE As Double = 0.01
 
 ' Output_All column positions. Keep these centralized so formatting and analysis
 ' stay aligned when diagnostic columns are added.
@@ -23,43 +24,47 @@ Private Const COL_FIRST_COUPON As Long = 10
 Private Const COL_MATURITY As Long = 11
 Private Const COL_INTEREST_RATE As Long = 12
 Private Const COL_QUANTITY As Long = 13
-Private Const COL_INTEREST_RATE_TYPE As Long = 14
-Private Const COL_INDEXATION_MODE As Long = 15
-Private Const COL_DAYS_SINCE_LAST As Long = 16
-Private Const COL_VALUE_DATE As Long = 17
-Private Const COL_LHS_NEXT As Long = 18
-Private Const COL_EXPECTED_NEXT As Long = 19
-Private Const COL_LHS_LAST As Long = 20
-Private Const COL_EXPECTED_LAST As Long = 21
-Private Const COL_PAYMENT As Long = 22
-Private Const COL_SCHEDULE_MATCH As Long = 23
-Private Const COL_PAYMENT_SHIFT As Long = 24
-Private Const COL_VALIDATION_RESULT As Long = 25
-Private Const COL_PRODUCT_REVIEW As Long = 26
-Private Const COL_STUB_FLAG As Long = 27
-Private Const COL_PAYMENT_MATCH As Long = 28
-Private Const COL_PAYMENT_DIFF As Long = 29
-Private Const COL_PAYMENT_SELECTION As Long = 30
-Private Const COL_LATEST_PAYMENT As Long = 31
-Private Const COL_ACCRUAL_CONVENTION As Long = 32
-Private Const COL_ACCRUAL_PERIOD As Long = 33
-Private Const COL_ACCRUAL_DAYS_SCHEDULE As Long = 34
-Private Const COL_ACCRUAL_DAYS_DIFF As Long = 35
-Private Const COL_ACCRUAL_DAYS_LHS As Long = 36
-Private Const COL_COUPON_PERIOD_DAYS As Long = 37
-Private Const COL_YEAR_FRACTION As Long = 38
-Private Const COL_DAILY_ACCRUAL As Long = 39
-Private Const COL_EXPECTED_FULL_COUPON As Long = 40
-Private Const COL_ACCRUED_PERIOD_PCT As Long = 41
-Private Const COL_ACCRUAL_REMAINING As Long = 42
-Private Const COL_EXPECTED_ACCRUAL As Long = 43
-Private Const COL_EXPECTED_ACCRUAL_LHS As Long = 44
-Private Const COL_LHS_ACCRUED As Long = 45
-Private Const COL_ACCRUAL_DIFF As Long = 46
-Private Const COL_ACCRUAL_DIFF_PCT As Long = 47
-Private Const COL_ACCRUAL_MATCH As Long = 48
-Private Const COL_ACCRUAL_RESULT As Long = 49
-Private Const OUTPUT_ALL_COLUMN_COUNT As Long = 49
+Private Const COL_FACE_VALUE As Long = 14
+Private Const COL_REIMBURSEMENT_FACTOR As Long = 15
+Private Const COL_CALCULATED_CURRENT_FACE As Long = 16
+Private Const COL_CURRENT_FACE_MATCH As Long = 17
+Private Const COL_INTEREST_RATE_TYPE As Long = 18
+Private Const COL_INDEXATION_MODE As Long = 19
+Private Const COL_DAYS_SINCE_LAST As Long = 20
+Private Const COL_VALUE_DATE As Long = 21
+Private Const COL_LHS_NEXT As Long = 22
+Private Const COL_EXPECTED_NEXT As Long = 23
+Private Const COL_LHS_LAST As Long = 24
+Private Const COL_EXPECTED_LAST As Long = 25
+Private Const COL_PAYMENT As Long = 26
+Private Const COL_SCHEDULE_MATCH As Long = 27
+Private Const COL_PAYMENT_SHIFT As Long = 28
+Private Const COL_VALIDATION_RESULT As Long = 29
+Private Const COL_PRODUCT_REVIEW As Long = 30
+Private Const COL_STUB_FLAG As Long = 31
+Private Const COL_PAYMENT_MATCH As Long = 32
+Private Const COL_PAYMENT_DIFF As Long = 33
+Private Const COL_PAYMENT_SELECTION As Long = 34
+Private Const COL_LATEST_PAYMENT As Long = 35
+Private Const COL_ACCRUAL_CONVENTION As Long = 36
+Private Const COL_ACCRUAL_PERIOD As Long = 37
+Private Const COL_ACCRUAL_DAYS_SCHEDULE As Long = 38
+Private Const COL_ACCRUAL_DAYS_DIFF As Long = 39
+Private Const COL_ACCRUAL_DAYS_LHS As Long = 40
+Private Const COL_COUPON_PERIOD_DAYS As Long = 41
+Private Const COL_YEAR_FRACTION As Long = 42
+Private Const COL_DAILY_ACCRUAL As Long = 43
+Private Const COL_EXPECTED_FULL_COUPON As Long = 44
+Private Const COL_ACCRUED_PERIOD_PCT As Long = 45
+Private Const COL_ACCRUAL_REMAINING As Long = 46
+Private Const COL_EXPECTED_ACCRUAL As Long = 47
+Private Const COL_EXPECTED_ACCRUAL_LHS As Long = 48
+Private Const COL_LHS_ACCRUED As Long = 49
+Private Const COL_ACCRUAL_DIFF As Long = 50
+Private Const COL_ACCRUAL_DIFF_PCT As Long = 51
+Private Const COL_ACCRUAL_MATCH As Long = 52
+Private Const COL_ACCRUAL_RESULT As Long = 53
+Private Const OUTPUT_ALL_COLUMN_COUNT As Long = 53
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
@@ -126,7 +131,8 @@ Public Function CreateOutputWorkbook( _
     wksLHS.Columns("G:H").NumberFormat = "dd/mm/yyyy"
     wksLHS.Columns("K:K").NumberFormat = "dd/mm/yyyy"
     wksLHS.Columns("O:P").NumberFormat = "dd/mm/yyyy"
-    wksLHS.Columns("S:S").NumberFormat = "#,##0.00"
+    wksLHS.Columns("S:T").NumberFormat = "#,##0.00"
+    wksLHS.Columns("U:U").NumberFormat = "0.000000000"
     wksNeolink.Columns("F:G").NumberFormat = "dd/mm/yyyy"
 
     Application.StatusBar = "Last Coupon Date Checker: Formatting output..."
@@ -202,6 +208,10 @@ Private Function BuildOutputAllArray( _
     Dim dblAccountingDate As Double
     Dim dblExpectedLast As Double
     Dim dblExpectedNext As Double
+    Dim dblCalculatedCurrentFace As Double
+    Dim dblFaceValue As Double
+    Dim dblReimbursementFactor As Double
+    Dim dblQuantityForFace As Double
     Dim dblFirstCoupon As Double
     Dim dblLastCouponDate As Double
     Dim dblMaturityDate As Double
@@ -282,6 +292,35 @@ Private Function BuildOutputAllArray( _
             arrResult(lngOutputRow, COL_START_DATE) = arrLHS(lngRow, 11)
             arrResult(lngOutputRow, COL_INTEREST_RATE) = arrLHS(lngRow, 12)
             If lngLhsCols >= 19 Then arrResult(lngOutputRow, COL_QUANTITY) = arrLHS(lngRow, 19)
+            If lngLhsCols >= 20 Then arrResult(lngOutputRow, COL_FACE_VALUE) = arrLHS(lngRow, 20)
+            If lngLhsCols >= 21 Then _
+                arrResult(lngOutputRow, COL_REIMBURSEMENT_FACTOR) = arrLHS(lngRow, 21)
+
+            ' MBS/current-face diagnostic kept inline for the hot loop.
+            If lngLhsCols >= 21 Then
+                If IsNumeric(arrLHS(lngRow, 20)) And IsNumeric(arrLHS(lngRow, 21)) Then
+                    dblFaceValue = CDbl(arrLHS(lngRow, 20))
+                    dblReimbursementFactor = CDbl(arrLHS(lngRow, 21))
+                    If dblFaceValue <> 0 And dblReimbursementFactor <> 0 Then
+                        dblCalculatedCurrentFace = dblFaceValue * dblReimbursementFactor
+                        arrResult(lngOutputRow, COL_CALCULATED_CURRENT_FACE) = _
+                            dblCalculatedCurrentFace
+
+                        If IsNumeric(arrLHS(lngRow, 19)) Then
+                            dblQuantityForFace = CDbl(arrLHS(lngRow, 19))
+                            If Abs(dblQuantityForFace - dblCalculatedCurrentFace) <= _
+                               CURRENT_FACE_MATCH_TOLERANCE Then
+                                arrResult(lngOutputRow, COL_CURRENT_FACE_MATCH) = "TRUE"
+                            Else
+                                arrResult(lngOutputRow, COL_CURRENT_FACE_MATCH) = "FALSE"
+                            End If
+                        Else
+                            arrResult(lngOutputRow, COL_CURRENT_FACE_MATCH) = "REVIEW"
+                        End If
+                    End If
+                End If
+            End If
+
             arrResult(lngOutputRow, COL_DAYS_SINCE_LAST) = arrLHS(lngRow, 5)
             arrResult(lngOutputRow, COL_LHS_NEXT) = arrLHS(lngRow, 4)
             arrResult(lngOutputRow, COL_LHS_LAST) = vLastCoupon
@@ -701,6 +740,10 @@ Private Sub SetOutputAllHeaders(ByRef arrResult As Variant)
     arrResult(1, COL_MATURITY) = "MATURITY DATE"
     arrResult(1, COL_INTEREST_RATE) = "INTEREST RATE"
     arrResult(1, COL_QUANTITY) = "QUANTITY"
+    arrResult(1, COL_FACE_VALUE) = "FACE VALUE"
+    arrResult(1, COL_REIMBURSEMENT_FACTOR) = "REIMBURSEMENT FACTOR (MSB)"
+    arrResult(1, COL_CALCULATED_CURRENT_FACE) = "Calculated Current Face"
+    arrResult(1, COL_CURRENT_FACE_MATCH) = "Quantity vs Current Face Match"
     arrResult(1, COL_INTEREST_RATE_TYPE) = "INTEREST RATE TYPE"
     arrResult(1, COL_INDEXATION_MODE) = "SECURITY INDEXATION MODE"
     arrResult(1, COL_DAYS_SINCE_LAST) = "NBR OF DAYS SINCE LAST COUPON"
@@ -727,7 +770,8 @@ Private Sub SetOutputAllHeaders(ByRef arrResult As Variant)
     arrResult(1, COL_COUPON_PERIOD_DAYS) = "Coupon Period Days"
     arrResult(1, COL_YEAR_FRACTION) = "Year Fraction - Schedule"
     arrResult(1, COL_DAILY_ACCRUAL) = "Daily Accrual"
-    arrResult(1, COL_EXPECTED_FULL_COUPON) = "Expected Full Coupon Accrual"
+    arrResult(1, COL_EXPECTED_FULL_COUPON) = _
+        "Simple Expected Full Coupon (Current LHS Rate)"
     arrResult(1, COL_ACCRUED_PERIOD_PCT) = "Accrued % of Coupon Period"
     arrResult(1, COL_ACCRUAL_REMAINING) = "Accrual Remaining to Next Coupon"
     arrResult(1, COL_EXPECTED_ACCRUAL) = "Expected Accrual - Schedule"
@@ -1133,6 +1177,7 @@ Private Function GetProductReviewFlag(ByVal vGtiName As Variant) As String
     Const METHOD_NAME As String = "GetProductReviewFlag"
     Dim errDescription As String
     Dim errNumber As Long
+    Dim strFlags As String
     Dim strName As String
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
@@ -1141,18 +1186,24 @@ Private Function GetProductReviewFlag(ByVal vGtiName As Variant) As String
     strName = UCase$(Trim$(CStr(vGtiName)))
 
     If InStr(1, strName, "MBS", vbTextCompare) > 0 Then
-        GetProductReviewFlag = "REVIEW - MBS"
-    ElseIf InStr(1, strName, "ABS", vbTextCompare) > 0 Then
-        GetProductReviewFlag = "REVIEW - ABS"
-    ElseIf InStr(1, strName, "AMORT", vbTextCompare) > 0 Then
-        GetProductReviewFlag = "REVIEW - AMORTIZING"
-    ElseIf InStr(1, strName, "FLOAT", vbTextCompare) > 0 Or _
-           InStr(1, strName, "FRN", vbTextCompare) > 0 Or _
-           InStr(1, strName, "VARIABLE", vbTextCompare) > 0 Then
-        GetProductReviewFlag = "REVIEW - FLOATING/VARIABLE"
-    ElseIf InStr(1, strName, "CALLABLE", vbTextCompare) > 0 Then
-        GetProductReviewFlag = "REVIEW - CALLABLE"
+        strFlags = AppendReviewFlag(strFlags, "MBS")
     End If
+    If InStr(1, strName, "ABS", vbTextCompare) > 0 Then
+        strFlags = AppendReviewFlag(strFlags, "ABS")
+    End If
+    If InStr(1, strName, "AMORT", vbTextCompare) > 0 Then
+        strFlags = AppendReviewFlag(strFlags, "AMORTIZING")
+    End If
+    If InStr(1, strName, "FLOAT", vbTextCompare) > 0 Or _
+       InStr(1, strName, "FRN", vbTextCompare) > 0 Or _
+       InStr(1, strName, "VARIABLE", vbTextCompare) > 0 Then
+        strFlags = AppendReviewFlag(strFlags, "FLOATING/VARIABLE")
+    End If
+    If InStr(1, strName, "CALLABLE", vbTextCompare) > 0 Then
+        strFlags = AppendReviewFlag(strFlags, "CALLABLE")
+    End If
+
+    If Len(strFlags) > 0 Then GetProductReviewFlag = "REVIEW - " & strFlags
 
 ExitPoint:
     If errNumber <> 0 Then
@@ -1165,6 +1216,16 @@ ErrHandler:
     errDescription = VBA.Err.Description
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
+End Function
+
+Private Function AppendReviewFlag( _
+    ByVal strExisting As String, ByVal strFlag As String) As String
+
+    If Len(strExisting) = 0 Then
+        AppendReviewFlag = strFlag
+    Else
+        AppendReviewFlag = strExisting & "; " & strFlag
+    End If
 End Function
 
 Private Function BuildValidationResult( _
@@ -1587,6 +1648,11 @@ Private Sub ApplyMatchFormatting(ByVal wksOutputAll As Excel.Worksheet)
     Set rngMatch = wksOutputAll.Range( _
         wksOutputAll.Cells(2, COL_ACCRUAL_MATCH), _
         wksOutputAll.Cells(lngLastRow, COL_ACCRUAL_MATCH))
+    Call AddTrueFalseFormatting(rngMatch)
+
+    Set rngMatch = wksOutputAll.Range( _
+        wksOutputAll.Cells(2, COL_CURRENT_FACE_MATCH), _
+        wksOutputAll.Cells(lngLastRow, COL_CURRENT_FACE_MATCH))
     Call AddTrueFalseFormatting(rngMatch)
 
 ExitPoint:
@@ -2300,9 +2366,11 @@ Private Function BuildAccrualValidationResult( _
 
     If Len(strReview) > 0 Then
         If UCase$(strMatch) = "TRUE" Then
-            BuildAccrualValidationResult = strReview & " / ACCRUAL MATCH"
+            BuildAccrualValidationResult = _
+                strReview & " / SIMPLE COUPON MODEL / ACCRUAL MATCH"
         Else
-            BuildAccrualValidationResult = strReview & " / ACCRUAL MISMATCH"
+            BuildAccrualValidationResult = _
+                strReview & " / SIMPLE COUPON MODEL / ACCRUAL MISMATCH"
         End If
     ElseIf UCase$(strMatch) = "TRUE" Then
         BuildAccrualValidationResult = "OK - METHOD 1 MODEL"
@@ -2382,7 +2450,10 @@ Private Sub SetOutputAllNumberFormats(ByVal wksOutputAll As Excel.Worksheet)
 
     wksOutputAll.Columns(COL_PAYMENT_SHIFT).NumberFormat = "0"
     wksOutputAll.Columns(COL_PAYMENT_DIFF).NumberFormat = "0"
-    wksOutputAll.Columns(COL_QUANTITY).NumberFormat = "#,##0.00"
+    wksOutputAll.Columns(COL_QUANTITY).NumberFormat = "#,##0.0000"
+    wksOutputAll.Columns(COL_FACE_VALUE).NumberFormat = "#,##0.00"
+    wksOutputAll.Columns(COL_REIMBURSEMENT_FACTOR).NumberFormat = "0.000000000"
+    wksOutputAll.Columns(COL_CALCULATED_CURRENT_FACE).NumberFormat = "#,##0.0000"
     wksOutputAll.Columns(COL_INTEREST_RATE).NumberFormat = "0.000000"
     wksOutputAll.Columns(COL_ACCRUAL_DAYS_SCHEDULE).NumberFormat = "0"
     wksOutputAll.Columns(COL_ACCRUAL_DAYS_DIFF).NumberFormat = "0"
