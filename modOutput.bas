@@ -49,14 +49,17 @@ Private Const COL_ACCRUAL_DAYS_LHS As Long = 36
 Private Const COL_COUPON_PERIOD_DAYS As Long = 37
 Private Const COL_YEAR_FRACTION As Long = 38
 Private Const COL_DAILY_ACCRUAL As Long = 39
-Private Const COL_EXPECTED_ACCRUAL As Long = 40
-Private Const COL_EXPECTED_ACCRUAL_LHS As Long = 41
-Private Const COL_LHS_ACCRUED As Long = 42
-Private Const COL_ACCRUAL_DIFF As Long = 43
-Private Const COL_ACCRUAL_DIFF_PCT As Long = 44
-Private Const COL_ACCRUAL_MATCH As Long = 45
-Private Const COL_ACCRUAL_RESULT As Long = 46
-Private Const OUTPUT_ALL_COLUMN_COUNT As Long = 46
+Private Const COL_EXPECTED_FULL_COUPON As Long = 40
+Private Const COL_ACCRUED_PERIOD_PCT As Long = 41
+Private Const COL_ACCRUAL_REMAINING As Long = 42
+Private Const COL_EXPECTED_ACCRUAL As Long = 43
+Private Const COL_EXPECTED_ACCRUAL_LHS As Long = 44
+Private Const COL_LHS_ACCRUED As Long = 45
+Private Const COL_ACCRUAL_DIFF As Long = 46
+Private Const COL_ACCRUAL_DIFF_PCT As Long = 47
+Private Const COL_ACCRUAL_MATCH As Long = 48
+Private Const COL_ACCRUAL_RESULT As Long = 49
+Private Const OUTPUT_ALL_COLUMN_COUNT As Long = 49
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
@@ -613,6 +616,11 @@ Private Sub PopulateVerifiedMethod1AccrualFast( _
     arrResult(lngOutputRow, COL_COUPON_PERIOD_DAYS) = lngCouponPeriodDays
     arrResult(lngOutputRow, COL_YEAR_FRACTION) = dblYearFraction
     arrResult(lngOutputRow, COL_DAILY_ACCRUAL) = dblDailyAccrual
+    arrResult(lngOutputRow, COL_EXPECTED_FULL_COUPON) = dblCouponAmount
+    arrResult(lngOutputRow, COL_ACCRUED_PERIOD_PCT) = _
+        CDbl(lngAccrualDays) / CDbl(lngCouponPeriodDays)
+    arrResult(lngOutputRow, COL_ACCRUAL_REMAINING) = _
+        dblCouponAmount - dblExpectedAccrual
     arrResult(lngOutputRow, COL_EXPECTED_ACCRUAL) = dblExpectedAccrual
 
     If IsNumeric(arrLHS(lngLHSRow, 5)) Then
@@ -719,6 +727,9 @@ Private Sub SetOutputAllHeaders(ByRef arrResult As Variant)
     arrResult(1, COL_COUPON_PERIOD_DAYS) = "Coupon Period Days"
     arrResult(1, COL_YEAR_FRACTION) = "Year Fraction - Schedule"
     arrResult(1, COL_DAILY_ACCRUAL) = "Daily Accrual"
+    arrResult(1, COL_EXPECTED_FULL_COUPON) = "Expected Full Coupon Accrual"
+    arrResult(1, COL_ACCRUED_PERIOD_PCT) = "Accrued % of Coupon Period"
+    arrResult(1, COL_ACCRUAL_REMAINING) = "Accrual Remaining to Next Coupon"
     arrResult(1, COL_EXPECTED_ACCRUAL) = "Expected Accrual - Schedule"
     arrResult(1, COL_EXPECTED_ACCRUAL_LHS) = "Expected Accrual - LHS Date"
     arrResult(1, COL_LHS_ACCRUED) = "LHS Accrued Interest ACC'S CCY"
@@ -2017,6 +2028,12 @@ Private Sub PopulateAccrualDiagnostics( _
     arrResult(lngOutputRow, COL_COUPON_PERIOD_DAYS) = lngCouponPeriodDays
     arrResult(lngOutputRow, COL_YEAR_FRACTION) = dblYearFraction
     arrResult(lngOutputRow, COL_DAILY_ACCRUAL) = dblDailyAccrual
+    arrResult(lngOutputRow, COL_EXPECTED_FULL_COUPON) = _
+        dblDailyAccrual * CDbl(lngCouponPeriodDays)
+    arrResult(lngOutputRow, COL_ACCRUED_PERIOD_PCT) = _
+        CDbl(lngAccrualDays) / CDbl(lngCouponPeriodDays)
+    arrResult(lngOutputRow, COL_ACCRUAL_REMAINING) = _
+        (dblDailyAccrual * CDbl(lngCouponPeriodDays)) - dblExpectedAccrual
     arrResult(lngOutputRow, COL_EXPECTED_ACCRUAL) = dblExpectedAccrual
 
     If TryGetDoubleValue(arrLHS(lngLHSRow, 5), dblLhsDaysValue) Then
@@ -2373,6 +2390,9 @@ Private Sub SetOutputAllNumberFormats(ByVal wksOutputAll As Excel.Worksheet)
     wksOutputAll.Columns(COL_COUPON_PERIOD_DAYS).NumberFormat = "0"
     wksOutputAll.Columns(COL_YEAR_FRACTION).NumberFormat = "0.00000000"
     wksOutputAll.Columns(COL_DAILY_ACCRUAL).NumberFormat = "#,##0.0000"
+    wksOutputAll.Columns(COL_EXPECTED_FULL_COUPON).NumberFormat = "#,##0.00"
+    wksOutputAll.Columns(COL_ACCRUED_PERIOD_PCT).NumberFormat = "0.00%"
+    wksOutputAll.Columns(COL_ACCRUAL_REMAINING).NumberFormat = "#,##0.00"
     wksOutputAll.Columns(COL_EXPECTED_ACCRUAL).NumberFormat = "#,##0.00"
     wksOutputAll.Columns(COL_EXPECTED_ACCRUAL_LHS).NumberFormat = "#,##0.00"
     wksOutputAll.Columns(COL_LHS_ACCRUED).NumberFormat = "#,##0.00"
