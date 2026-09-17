@@ -3,6 +3,8 @@ Option Explicit
 Private Const CLASS_NAME As String = "modInputLHS"
 Private Const LHS_SHEET_NAME As String = "FAMOO-Full Inventory IFRS"
 Private Const LHS_QUANTITY_COLUMN As Long = 10
+Private Const LHS_REIMBURSEMENT_FACTOR_COLUMN As Long = 48
+Private Const LHS_FACE_VALUE_COLUMN As Long = 104
 Private Const ERR_LHS As Long = vbObjectError + 6400
 
 '-------------------------------------------------------------------------------
@@ -66,6 +68,8 @@ Public Function LoadLHSInput( _
 
     Call ValidateLHSHeaders(wksSource, arrColumns, arrHeaders)
     Call ValidateFixedHeader(wksSource, LHS_QUANTITY_COLUMN, "QUANTITY")
+    Call ValidateFixedHeader(wksSource, LHS_FACE_VALUE_COLUMN, "FACE VALUE")
+    Call ValidateReimbursementFactorHeader(wksSource)
 
     lngLastRow = wksSource.Cells(wksSource.Rows.Count, 1).End(xlUp).Row
     If lngLastRow < 2 Then
@@ -74,7 +78,7 @@ Public Function LoadLHSInput( _
         lngDataRows = lngLastRow - 1
     End If
 
-    ReDim arrOutput(1 To lngDataRows + 1, 1 To 19)
+    ReDim arrOutput(1 To lngDataRows + 1, 1 To 21)
 
     For lngColIndex = LBound(arrHeaders) To UBound(arrHeaders)
         arrOutput(1, lngColIndex + 1) = CStr(arrHeaders(lngColIndex))
@@ -84,6 +88,8 @@ Public Function LoadLHSInput( _
         arrOutput(1, 15 + lngColIndex) = CStr(arrOptionalHeaders(lngColIndex))
     Next lngColIndex
     arrOutput(1, 19) = "QUANTITY"
+    arrOutput(1, 20) = "FACE VALUE"
+    arrOutput(1, 21) = "REIMBURSEMENT FACTOR (MSB)"
 
     If lngDataRows > 0 Then
         For lngColIndex = LBound(arrColumns) To UBound(arrColumns)
@@ -151,6 +157,30 @@ Public Function LoadLHSInput( _
         Else
             For lngRow = 1 To lngDataRows
                 arrOutput(lngRow + 1, 19) = arrColumn(lngRow, 1)
+            Next lngRow
+        End If
+
+        arrColumn = wksSource.Range( _
+            wksSource.Cells(2, LHS_FACE_VALUE_COLUMN), _
+            wksSource.Cells(lngLastRow, LHS_FACE_VALUE_COLUMN)).Value2
+
+        If lngDataRows = 1 Then
+            arrOutput(2, 20) = arrColumn
+        Else
+            For lngRow = 1 To lngDataRows
+                arrOutput(lngRow + 1, 20) = arrColumn(lngRow, 1)
+            Next lngRow
+        End If
+
+        arrColumn = wksSource.Range( _
+            wksSource.Cells(2, LHS_REIMBURSEMENT_FACTOR_COLUMN), _
+            wksSource.Cells(lngLastRow, LHS_REIMBURSEMENT_FACTOR_COLUMN)).Value2
+
+        If lngDataRows = 1 Then
+            arrOutput(2, 21) = arrColumn
+        Else
+            For lngRow = 1 To lngDataRows
+                arrOutput(lngRow + 1, 21) = arrColumn(lngRow, 1)
             Next lngRow
         End If
     End If
@@ -377,6 +407,42 @@ ErrHandler:
     Call ErrorManager.addError( _
         CLASS_NAME, METHOD_NAME, errNumber, errDescription, _
         "lngColumn", lngColumn)
+    GoTo ExitPoint
+End Sub
+
+
+Private Sub ValidateReimbursementFactorHeader(ByVal wksSource As Excel.Worksheet)
+    Const METHOD_NAME As String = "ValidateReimbursementFactorHeader"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strActual As String
+    Dim strKey As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strActual = Trim$(CStr(wksSource.Cells(1, LHS_REIMBURSEMENT_FACTOR_COLUMN).Value2))
+    strKey = UCase$(Replace(strActual, " ", vbNullString))
+
+    If strKey <> "REIMBURSEMENTFACTOR(MSB)" And _
+       strKey <> "REIMBURSEMENTFACTOR(MBS)" Then
+        Err.Raise ERR_LHS, METHOD_NAME, _
+            "Unexpected LHS header in column " & _
+            wksSource.Cells(1, LHS_REIMBURSEMENT_FACTOR_COLUMN).Address(False, False) & _
+            ". Expected Reimbursement Factor (MSB/MBS), found '" & strActual & "'."
+    End If
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError( _
+        CLASS_NAME, METHOD_NAME, errNumber, errDescription, _
+        "column", LHS_REIMBURSEMENT_FACTOR_COLUMN)
     GoTo ExitPoint
 End Sub
 
