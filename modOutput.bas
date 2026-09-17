@@ -185,12 +185,17 @@ Private Function BuildOutputAllArray( _
     ByVal arrLHS As Variant, ByVal arrNeolink As Variant) As Variant
 
     Const METHOD_NAME As String = "BuildOutputAllArray"
+    Dim arrAccrualConventionText As Variant
+    Dim arrAccrualPeriodText As Variant
     Dim arrLookupValue As Variant
     Dim arrResult() As Variant
+    Dim arrScheduleValue As Variant
     Dim blnHasLastCouponDate As Boolean
     Dim blnHasPayment As Boolean
     Dim blnScheduleBuilt As Boolean
     Dim dictPreferredPayment As Object
+    Dim dictProductReview As Object
+    Dim dictScheduleCache As Object
     Dim dblAccountingDate As Double
     Dim dblExpectedLast As Double
     Dim dblExpectedNext As Double
@@ -201,25 +206,49 @@ Private Function BuildOutputAllArray( _
     Dim dblStartDate As Double
     Dim errDescription As String
     Dim errNumber As Long
+    Dim lngBondCalc As Long
+    Dim lngFrequency As Long
     Dim lngLastCouponDay As Long
+    Dim lngLhsCols As Long
     Dim lngOutputRow As Long
     Dim lngPaymentDay As Long
     Dim lngRow As Long
     Dim lngRows As Long
     Dim lngRowsWithLastCouponDate As Long
+    Dim strGtiName As String
     Dim strKey As String
     Dim strProductReview As String
+    Dim strScheduleCacheKey As String
     Dim strScheduleReason As String
     Dim strStubFlag As String
+    Dim vLastCoupon As Variant
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     Set dictPreferredPayment = BuildPreferredNeolinkPaymentLookup(arrNeolink)
-    lngRows = UBound(arrLHS, 1)
+    Set dictProductReview = CreateObject("Scripting.Dictionary")
+    dictProductReview.CompareMode = vbTextCompare
+    Set dictScheduleCache = CreateObject("Scripting.Dictionary")
+    dictScheduleCache.CompareMode = vbBinaryCompare
 
+    arrAccrualConventionText = Array( _
+        vbNullString, "1 - 365-6/365", "2 - 365-6/360", "3 - 360/360", _
+        "4 - 360/365", "5 - 365-6/365-6", "6 - 365-6/365-6 = Civil", _
+        "7 - 360/360 US", "8 - Actual/364", "9 - Actual/252")
+    arrAccrualPeriodText = Array( _
+        vbNullString, "End of Month", "End of Quarter", "End of half-year", _
+        "End of Year", "Monthly", "Quarterly", "Half-year", "Year", "Maturity")
+
+    lngRows = UBound(arrLHS, 1)
+    lngLhsCols = UBound(arrLHS, 2)
+
+    ' Count qualifying rows without calling a helper for every LHS record.
     For lngRow = 2 To lngRows
-        If HasNonEmptyValue(arrLHS(lngRow, 3)) Then
-            lngRowsWithLastCouponDate = lngRowsWithLastCouponDate + 1
+        vLastCoupon = arrLHS(lngRow, 3)
+        If Not IsError(vLastCoupon) And Not IsEmpty(vLastCoupon) Then
+            If VarType(vLastCoupon) <> vbString Or LenB(Trim$(CStr(vLastCoupon))) > 0 Then
+                lngRowsWithLastCouponDate = lngRowsWithLastCouponDate + 1
+            End If
         End If
     Next lngRow
 
@@ -229,7 +258,15 @@ Private Function BuildOutputAllArray( _
     lngOutputRow = 1
 
     For lngRow = 2 To lngRows
-        If HasNonEmptyValue(arrLHS(lngRow, 3)) Then
+        vLastCoupon = arrLHS(lngRow, 3)
+        blnHasLastCouponDate = False
+        If Not IsError(vLastCoupon) And Not IsEmpty(vLastCoupon) Then
+            If VarType(vLastCoupon) <> vbString Or LenB(Trim$(CStr(vLastCoupon))) > 0 Then
+                blnHasLastCouponDate = True
+            End If
+        End If
+
+        If blnHasLastCouponDate Then
             lngOutputRow = lngOutputRow + 1
 
             arrResult(lngOutputRow, COL_FUND) = arrLHS(lngRow, 1)
@@ -241,27 +278,27 @@ Private Function BuildOutputAllArray( _
             arrResult(lngOutputRow, COL_BOND_CALC) = arrLHS(lngRow, 10)
             arrResult(lngOutputRow, COL_START_DATE) = arrLHS(lngRow, 11)
             arrResult(lngOutputRow, COL_INTEREST_RATE) = arrLHS(lngRow, 12)
-            If UBound(arrLHS, 2) >= 19 Then
-                arrResult(lngOutputRow, COL_QUANTITY) = arrLHS(lngRow, 19)
-            End If
+            If lngLhsCols >= 19 Then arrResult(lngOutputRow, COL_QUANTITY) = arrLHS(lngRow, 19)
             arrResult(lngOutputRow, COL_DAYS_SINCE_LAST) = arrLHS(lngRow, 5)
             arrResult(lngOutputRow, COL_LHS_NEXT) = arrLHS(lngRow, 4)
-            arrResult(lngOutputRow, COL_LHS_LAST) = arrLHS(lngRow, 3)
+            arrResult(lngOutputRow, COL_LHS_LAST) = vLastCoupon
 
-            If UBound(arrLHS, 2) >= 15 Then
-                arrResult(lngOutputRow, COL_MATURITY) = arrLHS(lngRow, 15)
-            End If
-            If UBound(arrLHS, 2) >= 16 Then
-                arrResult(lngOutputRow, COL_FIRST_COUPON) = arrLHS(lngRow, 16)
-            End If
-            If UBound(arrLHS, 2) >= 17 Then
-                arrResult(lngOutputRow, COL_INTEREST_RATE_TYPE) = arrLHS(lngRow, 17)
-            End If
-            If UBound(arrLHS, 2) >= 18 Then
-                arrResult(lngOutputRow, COL_INDEXATION_MODE) = arrLHS(lngRow, 18)
-            End If
+            If lngLhsCols >= 15 Then arrResult(lngOutputRow, COL_MATURITY) = arrLHS(lngRow, 15)
+            If lngLhsCols >= 16 Then arrResult(lngOutputRow, COL_FIRST_COUPON) = arrLHS(lngRow, 16)
+            If lngLhsCols >= 17 Then arrResult(lngOutputRow, COL_INTEREST_RATE_TYPE) = arrLHS(lngRow, 17)
+            If lngLhsCols >= 18 Then arrResult(lngOutputRow, COL_INDEXATION_MODE) = arrLHS(lngRow, 18)
 
-            strProductReview = GetProductReviewFlag(arrLHS(lngRow, 6))
+            ' Cache GTI classification because the same product names repeat many times.
+            strGtiName = vbNullString
+            If Not IsError(arrLHS(lngRow, 6)) And Not IsEmpty(arrLHS(lngRow, 6)) Then
+                strGtiName = Trim$(CStr(arrLHS(lngRow, 6)))
+            End If
+            If dictProductReview.Exists(strGtiName) Then
+                strProductReview = CStr(dictProductReview(strGtiName))
+            Else
+                strProductReview = GetProductReviewFlag(strGtiName)
+                dictProductReview.Add strGtiName, strProductReview
+            End If
             arrResult(lngOutputRow, COL_PRODUCT_REVIEW) = strProductReview
 
             strKey = BuildFundIsinKey(arrLHS(lngRow, 1), arrLHS(lngRow, 2))
@@ -285,57 +322,72 @@ Private Function BuildOutputAllArray( _
                 End If
             End If
 
-            blnHasLastCouponDate = TryGetExcelDateSerial( _
-                arrLHS(lngRow, 3), dblLastCouponDate)
+            ' LHS dates are normalized to numeric Excel serials by modInputLHS.
+            dblLastCouponDate = 0
+            If IsNumeric(vLastCoupon) Then
+                dblLastCouponDate = CDbl(vLastCoupon)
+            Else
+                Call TryGetExcelDateSerial(vLastCoupon, dblLastCouponDate)
+            End If
 
-            If blnHasPayment And blnHasLastCouponDate Then
+            If blnHasPayment And dblLastCouponDate > 0 Then
                 lngLastCouponDay = CLng(Int(dblLastCouponDate))
                 lngPaymentDay = CLng(Int(dblPaymentDate))
-
                 If lngLastCouponDay = lngPaymentDay Then
                     arrResult(lngOutputRow, COL_PAYMENT_MATCH) = "TRUE"
                 Else
                     arrResult(lngOutputRow, COL_PAYMENT_MATCH) = "FALSE"
                 End If
-
-                arrResult(lngOutputRow, COL_PAYMENT_DIFF) = _
-                    lngPaymentDay - lngLastCouponDay
+                arrResult(lngOutputRow, COL_PAYMENT_DIFF) = lngPaymentDay - lngLastCouponDay
             ElseIf Not blnHasPayment Then
                 arrResult(lngOutputRow, COL_PAYMENT_MATCH) = "NOT FOUND"
             End If
 
-            dblAccountingDate = 0
-            dblStartDate = 0
-            dblFirstCoupon = 0
+            dblAccountingDate = FastDateSerial(arrLHS(lngRow, 7))
+            dblStartDate = FastDateSerial(arrLHS(lngRow, 11))
             dblMaturityDate = 0
-            dblExpectedLast = 0
-            dblExpectedNext = 0
-            strStubFlag = vbNullString
-            strScheduleReason = vbNullString
+            dblFirstCoupon = 0
+            If lngLhsCols >= 15 Then dblMaturityDate = FastDateSerial(arrLHS(lngRow, 15))
+            If lngLhsCols >= 16 Then dblFirstCoupon = FastDateSerial(arrLHS(lngRow, 16))
 
-            Call TryGetExcelDateSerial(arrLHS(lngRow, 7), dblAccountingDate)
-            Call TryGetExcelDateSerial(arrLHS(lngRow, 11), dblStartDate)
-            If UBound(arrLHS, 2) >= 15 Then
-                Call TryGetExcelDateSerial(arrLHS(lngRow, 15), dblMaturityDate)
-            End If
-            If UBound(arrLHS, 2) >= 16 Then
-                Call TryGetExcelDateSerial(arrLHS(lngRow, 16), dblFirstCoupon)
-            End If
+            lngFrequency = FastLongCode(arrLHS(lngRow, 9))
+            lngBondCalc = FastLongCode(arrLHS(lngRow, 10))
 
-            blnScheduleBuilt = TryBuildExpectedCouponSchedule( _
-                dblAccountingDate, dblStartDate, dblFirstCoupon, dblMaturityDate, _
-                arrLHS(lngRow, 9), dblExpectedLast, dblExpectedNext, _
-                strStubFlag, strScheduleReason)
+            ' Cache schedule results. Identical securities/dates no longer recalculate
+            ' DateDiff/DateAdd and stub checks for every repeated holding.
+            strScheduleCacheKey = CStr(CLng(Int(dblAccountingDate))) & LOOKUP_SEPARATOR & _
+                CStr(CLng(Int(dblStartDate))) & LOOKUP_SEPARATOR & _
+                CStr(CLng(Int(dblFirstCoupon))) & LOOKUP_SEPARATOR & _
+                CStr(CLng(Int(dblMaturityDate))) & LOOKUP_SEPARATOR & CStr(lngFrequency)
+
+            If dictScheduleCache.Exists(strScheduleCacheKey) Then
+                arrScheduleValue = dictScheduleCache(strScheduleCacheKey)
+                blnScheduleBuilt = CBool(arrScheduleValue(0))
+                dblExpectedLast = CDbl(arrScheduleValue(1))
+                dblExpectedNext = CDbl(arrScheduleValue(2))
+                strStubFlag = CStr(arrScheduleValue(3))
+                strScheduleReason = CStr(arrScheduleValue(4))
+            Else
+                dblExpectedLast = 0
+                dblExpectedNext = 0
+                strStubFlag = vbNullString
+                strScheduleReason = vbNullString
+                blnScheduleBuilt = TryBuildExpectedCouponSchedule( _
+                    dblAccountingDate, dblStartDate, dblFirstCoupon, dblMaturityDate, _
+                    lngFrequency, dblExpectedLast, dblExpectedNext, _
+                    strStubFlag, strScheduleReason)
+                dictScheduleCache.Add strScheduleCacheKey, _
+                    Array(blnScheduleBuilt, dblExpectedLast, dblExpectedNext, _
+                          strStubFlag, strScheduleReason)
+            End If
 
             arrResult(lngOutputRow, COL_STUB_FLAG) = strStubFlag
 
             If blnScheduleBuilt Then
                 arrResult(lngOutputRow, COL_EXPECTED_LAST) = dblExpectedLast
-                If dblExpectedNext > 0 Then
-                    arrResult(lngOutputRow, COL_EXPECTED_NEXT) = dblExpectedNext
-                End If
+                If dblExpectedNext > 0 Then arrResult(lngOutputRow, COL_EXPECTED_NEXT) = dblExpectedNext
 
-                If blnHasLastCouponDate Then
+                If dblLastCouponDate > 0 Then
                     If CLng(Int(dblLastCouponDate)) = CLng(Int(dblExpectedLast)) Then
                         arrResult(lngOutputRow, COL_SCHEDULE_MATCH) = "TRUE"
                     Else
@@ -359,10 +411,38 @@ Private Function BuildOutputAllArray( _
                 arrResult(lngOutputRow, COL_VALIDATION_RESULT) = strScheduleReason
             End If
 
-            Call PopulateAccrualDiagnostics( _
-                arrResult, lngOutputRow, arrLHS, lngRow, blnScheduleBuilt, _
-                dblAccountingDate, dblExpectedLast, dblExpectedNext, _
-                strProductReview, strStubFlag)
+            If lngBondCalc >= 1 And lngBondCalc <= 9 Then
+                arrResult(lngOutputRow, COL_ACCRUAL_CONVENTION) = _
+                    arrAccrualConventionText(lngBondCalc)
+            Else
+                arrResult(lngOutputRow, COL_ACCRUAL_CONVENTION) = "(missing)"
+            End If
+            If lngFrequency >= 1 And lngFrequency <= 9 Then
+                arrResult(lngOutputRow, COL_ACCRUAL_PERIOD) = arrAccrualPeriodText(lngFrequency)
+            Else
+                arrResult(lngOutputRow, COL_ACCRUAL_PERIOD) = "(missing)"
+            End If
+
+            If lngBondCalc = VERIFIED_ACCRUAL_METHOD Then
+                Call PopulateVerifiedMethod1AccrualFast( _
+                    arrResult, lngOutputRow, arrLHS, lngRow, lngFrequency, _
+                    blnScheduleBuilt, dblAccountingDate, dblExpectedLast, _
+                    dblExpectedNext, strProductReview, strStubFlag)
+            ElseIf lngBondCalc = 0 Then
+                arrResult(lngOutputRow, COL_ACCRUAL_MATCH) = "REVIEW"
+                arrResult(lngOutputRow, COL_ACCRUAL_RESULT) = _
+                    "REVIEW - BOND CALC METHOD MISSING"
+            Else
+                arrResult(lngOutputRow, COL_ACCRUAL_MATCH) = "REVIEW"
+                arrResult(lngOutputRow, COL_ACCRUAL_RESULT) = _
+                    "REVIEW - METHOD NOT VERIFIED"
+            End If
+        End If
+
+        If lngRow Mod 5000 = 0 Then
+            Application.StatusBar = "Last Coupon Date Checker: Calculating row " & _
+                CStr(lngRow) & " / " & CStr(lngRows) & "..."
+            DoEvents
         End If
     Next lngRow
 
@@ -370,6 +450,8 @@ Private Function BuildOutputAllArray( _
 
 ExitPoint:
     Set dictPreferredPayment = Nothing
+    Set dictProductReview = Nothing
+    Set dictScheduleCache = Nothing
 
     If errNumber <> 0 Then
         Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
@@ -382,6 +464,214 @@ ErrHandler:
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Function
+
+
+Private Function FastDateSerial(ByVal vValue As Variant) As Double
+    Const METHOD_NAME As String = "FastDateSerial"
+    Dim dblParsed As Double
+    Dim errDescription As String
+    Dim errNumber As Long
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If IsError(vValue) Or IsEmpty(vValue) Then GoTo ExitPoint
+    If IsNumeric(vValue) Then
+        If CDbl(vValue) > 0 Then FastDateSerial = CDbl(vValue)
+        GoTo ExitPoint
+    End If
+
+    If TryGetExcelDateSerial(vValue, dblParsed) Then FastDateSerial = dblParsed
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+Private Function FastLongCode(ByVal vValue As Variant) As Long
+    Const METHOD_NAME As String = "FastLongCode"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strValue As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If IsError(vValue) Or IsEmpty(vValue) Then GoTo ExitPoint
+    If IsNumeric(vValue) Then
+        FastLongCode = CLng(vValue)
+        GoTo ExitPoint
+    End If
+    strValue = Trim$(CStr(vValue))
+    If Len(strValue) > 0 And IsNumeric(strValue) Then FastLongCode = CLng(strValue)
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+Private Sub PopulateVerifiedMethod1AccrualFast( _
+    ByRef arrResult As Variant, ByVal lngOutputRow As Long, _
+    ByVal arrLHS As Variant, ByVal lngLHSRow As Long, _
+    ByVal lngFrequency As Long, ByVal blnScheduleBuilt As Boolean, _
+    ByVal dblAccountingDate As Double, ByVal dblExpectedLast As Double, _
+    ByVal dblExpectedNext As Double, ByVal strProductReview As String, _
+    ByVal strStubFlag As String)
+
+    Const METHOD_NAME As String = "PopulateVerifiedMethod1AccrualFast"
+    Dim blnHasLhsAccrued As Boolean
+    Dim dblCouponAmount As Double
+    Dim dblCouponFactor As Double
+    Dim dblDailyAccrual As Double
+    Dim dblExpectedAccrual As Double
+    Dim dblExpectedAccrualLhs As Double
+    Dim dblLhsAccrued As Double
+    Dim dblLhsLast As Double
+    Dim dblLhsNext As Double
+    Dim dblQuantity As Double
+    Dim dblRatePercent As Double
+    Dim dblYearFraction As Double
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngAccrualDays As Long
+    Dim lngAccrualDaysLhs As Long
+    Dim lngCouponPeriodDays As Long
+    Dim lngCouponPeriodDaysLhs As Long
+    Dim lngLhsDays As Long
+    Dim strMatch As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If Not blnScheduleBuilt Or dblExpectedLast <= 0 Or dblExpectedNext <= 0 Then
+        arrResult(lngOutputRow, COL_ACCRUAL_MATCH) = "REVIEW"
+        arrResult(lngOutputRow, COL_ACCRUAL_RESULT) = _
+            "REVIEW - EXPECTED COUPON SCHEDULE NOT AVAILABLE"
+        GoTo ExitPoint
+    End If
+
+    If UBound(arrLHS, 2) < 19 Or Not IsNumeric(arrLHS(lngLHSRow, 19)) Then
+        arrResult(lngOutputRow, COL_ACCRUAL_MATCH) = "REVIEW"
+        arrResult(lngOutputRow, COL_ACCRUAL_RESULT) = "REVIEW - QUANTITY MISSING OR ZERO"
+        GoTo ExitPoint
+    End If
+    dblQuantity = CDbl(arrLHS(lngLHSRow, 19))
+    If dblQuantity = 0 Then
+        arrResult(lngOutputRow, COL_ACCRUAL_MATCH) = "REVIEW"
+        arrResult(lngOutputRow, COL_ACCRUAL_RESULT) = "REVIEW - QUANTITY MISSING OR ZERO"
+        GoTo ExitPoint
+    End If
+
+    If Not IsNumeric(arrLHS(lngLHSRow, 12)) Then
+        arrResult(lngOutputRow, COL_ACCRUAL_MATCH) = "REVIEW"
+        arrResult(lngOutputRow, COL_ACCRUAL_RESULT) = "REVIEW - INTEREST RATE MISSING"
+        GoTo ExitPoint
+    End If
+    dblRatePercent = CDbl(arrLHS(lngLHSRow, 12))
+
+    Select Case lngFrequency
+        Case 1, 5: dblCouponFactor = 1# / 12#
+        Case 2, 6: dblCouponFactor = 1# / 4#
+        Case 3, 7: dblCouponFactor = 1# / 2#
+        Case 4, 8: dblCouponFactor = 1#
+        Case Else
+            arrResult(lngOutputRow, COL_ACCRUAL_MATCH) = "REVIEW"
+            arrResult(lngOutputRow, COL_ACCRUAL_RESULT) = _
+                "REVIEW - ACCRUAL FREQUENCY NOT SUPPORTED"
+            GoTo ExitPoint
+    End Select
+
+    lngCouponPeriodDays = CLng(Int(dblExpectedNext)) - CLng(Int(dblExpectedLast))
+    lngAccrualDays = CLng(Int(dblAccountingDate)) - CLng(Int(dblExpectedLast)) + 1
+    If lngCouponPeriodDays <= 0 Or lngAccrualDays < 0 Or _
+       lngAccrualDays > lngCouponPeriodDays Then
+        arrResult(lngOutputRow, COL_ACCRUAL_MATCH) = "REVIEW"
+        arrResult(lngOutputRow, COL_ACCRUAL_RESULT) = _
+            "REVIEW - ACCOUNTING DATE OUTSIDE COUPON PERIOD"
+        GoTo ExitPoint
+    End If
+
+    dblCouponAmount = dblQuantity * (dblRatePercent / 100#) * dblCouponFactor
+    dblYearFraction = dblCouponFactor * CDbl(lngAccrualDays) / CDbl(lngCouponPeriodDays)
+    dblDailyAccrual = dblCouponAmount / CDbl(lngCouponPeriodDays)
+    dblExpectedAccrual = dblQuantity * (dblRatePercent / 100#) * dblYearFraction
+
+    arrResult(lngOutputRow, COL_ACCRUAL_DAYS_SCHEDULE) = lngAccrualDays
+    arrResult(lngOutputRow, COL_COUPON_PERIOD_DAYS) = lngCouponPeriodDays
+    arrResult(lngOutputRow, COL_YEAR_FRACTION) = dblYearFraction
+    arrResult(lngOutputRow, COL_DAILY_ACCRUAL) = dblDailyAccrual
+    arrResult(lngOutputRow, COL_EXPECTED_ACCRUAL) = dblExpectedAccrual
+
+    If IsNumeric(arrLHS(lngLHSRow, 5)) Then
+        lngLhsDays = CLng(arrLHS(lngLHSRow, 5))
+        arrResult(lngOutputRow, COL_ACCRUAL_DAYS_DIFF) = lngLhsDays - lngAccrualDays
+    End If
+
+    dblLhsLast = FastDateSerial(arrLHS(lngLHSRow, 3))
+    dblLhsNext = FastDateSerial(arrLHS(lngLHSRow, 4))
+    If dblLhsLast > 0 And dblLhsNext > dblLhsLast Then
+        lngCouponPeriodDaysLhs = CLng(Int(dblLhsNext)) - CLng(Int(dblLhsLast))
+        lngAccrualDaysLhs = CLng(Int(dblAccountingDate)) - CLng(Int(dblLhsLast)) + 1
+        If lngAccrualDaysLhs >= 0 And lngAccrualDaysLhs <= lngCouponPeriodDaysLhs Then
+            dblExpectedAccrualLhs = dblQuantity * (dblRatePercent / 100#) * _
+                dblCouponFactor * CDbl(lngAccrualDaysLhs) / CDbl(lngCouponPeriodDaysLhs)
+            arrResult(lngOutputRow, COL_ACCRUAL_DAYS_LHS) = lngAccrualDaysLhs
+            arrResult(lngOutputRow, COL_EXPECTED_ACCRUAL_LHS) = dblExpectedAccrualLhs
+        End If
+    End If
+
+    blnHasLhsAccrued = IsNumeric(arrLHS(lngLHSRow, 13))
+    If Not blnHasLhsAccrued Then
+        arrResult(lngOutputRow, COL_ACCRUAL_MATCH) = "REVIEW"
+        arrResult(lngOutputRow, COL_ACCRUAL_RESULT) = _
+            "REVIEW - LHS ACCRUED INTEREST MISSING"
+        GoTo ExitPoint
+    End If
+
+    dblLhsAccrued = CDbl(arrLHS(lngLHSRow, 13))
+    arrResult(lngOutputRow, COL_LHS_ACCRUED) = dblLhsAccrued
+    arrResult(lngOutputRow, COL_ACCRUAL_DIFF) = dblLhsAccrued - dblExpectedAccrual
+    If Abs(dblExpectedAccrual) > 0.0000001 Then
+        arrResult(lngOutputRow, COL_ACCRUAL_DIFF_PCT) = _
+            (dblLhsAccrued - dblExpectedAccrual) / dblExpectedAccrual
+    End If
+
+    If Abs(dblLhsAccrued - dblExpectedAccrual) <= ACCRUAL_MATCH_TOLERANCE Then
+        strMatch = "TRUE"
+    Else
+        strMatch = "FALSE"
+    End If
+    arrResult(lngOutputRow, COL_ACCRUAL_MATCH) = strMatch
+    arrResult(lngOutputRow, COL_ACCRUAL_RESULT) = BuildAccrualValidationResult( _
+        strMatch, strProductReview, strStubFlag)
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError( _
+        CLASS_NAME, METHOD_NAME, errNumber, errDescription, _
+        "lngLHSRow", lngLHSRow)
+    GoTo ExitPoint
+End Sub
 
 Private Sub SetOutputAllHeaders(ByRef arrResult As Variant)
     Const METHOD_NAME As String = "SetOutputAllHeaders"
