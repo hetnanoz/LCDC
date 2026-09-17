@@ -2,6 +2,7 @@ Option Explicit
 
 Private Const CLASS_NAME As String = "modInputLHS"
 Private Const LHS_SHEET_NAME As String = "FAMOO-Full Inventory IFRS"
+Private Const LHS_QUANTITY_COLUMN As Long = 10
 Private Const ERR_LHS As Long = vbObjectError + 6400
 
 '-------------------------------------------------------------------------------
@@ -9,7 +10,7 @@ Private Const ERR_LHS As Long = vbObjectError + 6400
 ' Creation date: 2026-09-08
 ' Parameters:    strFullPath - selected LHS input; lngDataRows - returned row count
 ' Returns:       Variant - 2D output array including header row
-' Description:   Extracts the 14 required LHS columns in the requested order.
+' Description:   Extracts the required LHS columns plus schedule/accrual diagnostics.
 '-------------------------------------------------------------------------------
 Public Function LoadLHSInput( _
     ByVal strFullPath As String, ByRef lngDataRows As Long) As Variant
@@ -18,6 +19,7 @@ Public Function LoadLHSInput( _
     Dim arrColumn As Variant
     Dim arrColumns As Variant
     Dim arrHeaders As Variant
+    Dim arrOptionalHeaders As Variant
     Dim arrOutput() As Variant
     Dim blnOpenedByMacro As Boolean
     Dim errDescription As String
@@ -25,6 +27,7 @@ Public Function LoadLHSInput( _
     Dim lngColIndex As Long
     Dim lngLastRow As Long
     Dim lngOutputColumn As Long
+    Dim lngOptionalColumn As Long
     Dim lngRow As Long
     Dim wkbSource As Excel.Workbook
     Dim wksSource As Excel.Worksheet
@@ -49,10 +52,20 @@ Public Function LoadLHSInput( _
         "ACCRUED INTEREST IN ACC'S CCY", _
         "ACCRUED INTEREST IN FUND CCY")
 
+    ' Optional diagnostic fields are resolved by row-1 header name so their physical
+    ' source column can move without changing the macro. Missing optional fields are
+    ' left blank and handled as REVIEW downstream. QUANTITY is fixed in source J.
+    arrOptionalHeaders = Array( _
+        "MATURITY DATE", _
+        "FIRST COUPON DATE", _
+        "INTEREST RATE TYPE", _
+        "SECURITY INDEXATION MODE")
+
     Set wkbSource = GetOrOpenWorkbookReadOnly(strFullPath, blnOpenedByMacro)
     Set wksSource = GetWorksheetByName(wkbSource, LHS_SHEET_NAME)
 
     Call ValidateLHSHeaders(wksSource, arrColumns, arrHeaders)
+    Call ValidateFixedHeader(wksSource, LHS_QUANTITY_COLUMN, "QUANTITY")
 
     lngLastRow = wksSource.Cells(wksSource.Rows.Count, 1).End(xlUp).Row
     If lngLastRow < 2 Then
@@ -61,11 +74,16 @@ Public Function LoadLHSInput( _
         lngDataRows = lngLastRow - 1
     End If
 
-    ReDim arrOutput(1 To lngDataRows + 1, 1 To 14)
+    ReDim arrOutput(1 To lngDataRows + 1, 1 To 19)
 
     For lngColIndex = LBound(arrHeaders) To UBound(arrHeaders)
         arrOutput(1, lngColIndex + 1) = CStr(arrHeaders(lngColIndex))
     Next lngColIndex
+
+    For lngColIndex = LBound(arrOptionalHeaders) To UBound(arrOptionalHeaders)
+        arrOutput(1, 15 + lngColIndex) = CStr(arrOptionalHeaders(lngColIndex))
+    Next lngColIndex
+    arrOutput(1, 19) = "QUANTITY"
 
     If lngDataRows > 0 Then
         For lngColIndex = LBound(arrColumns) To UBound(arrColumns)
@@ -92,6 +110,49 @@ Public Function LoadLHSInput( _
                 Next lngRow
             End If
         Next lngColIndex
+
+        For lngColIndex = LBound(arrOptionalHeaders) To UBound(arrOptionalHeaders)
+            lngOptionalColumn = FindOptionalHeaderColumn( _
+                wksSource, CStr(arrOptionalHeaders(lngColIndex)))
+
+            If lngOptionalColumn > 0 Then
+                arrColumn = wksSource.Range( _
+                    wksSource.Cells(2, lngOptionalColumn), _
+                    wksSource.Cells(lngLastRow, lngOptionalColumn)).Value2
+
+                lngOutputColumn = 15 + lngColIndex
+
+                If lngDataRows = 1 Then
+                    If IsLHSDateOutputColumn(lngOutputColumn) Then
+                        arrOutput(2, lngOutputColumn) = NormalizeLHSDateValue(arrColumn)
+                    Else
+                        arrOutput(2, lngOutputColumn) = arrColumn
+                    End If
+                Else
+                    For lngRow = 1 To lngDataRows
+                        If IsLHSDateOutputColumn(lngOutputColumn) Then
+                            arrOutput(lngRow + 1, lngOutputColumn) = _
+                                NormalizeLHSDateValue(arrColumn(lngRow, 1))
+                        Else
+                            arrOutput(lngRow + 1, lngOutputColumn) = arrColumn(lngRow, 1)
+                        End If
+                    Next lngRow
+                End If
+            End If
+        Next lngColIndex
+
+
+        arrColumn = wksSource.Range( _
+            wksSource.Cells(2, LHS_QUANTITY_COLUMN), _
+            wksSource.Cells(lngLastRow, LHS_QUANTITY_COLUMN)).Value2
+
+        If lngDataRows = 1 Then
+            arrOutput(2, 19) = arrColumn
+        Else
+            For lngRow = 1 To lngDataRows
+                arrOutput(lngRow + 1, 19) = arrColumn(lngRow, 1)
+            Next lngRow
+        End If
     End If
 
     LoadLHSInput = arrOutput
@@ -134,7 +195,7 @@ Private Function IsLHSDateOutputColumn(ByVal lngOutputColumn As Long) As Boolean
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     Select Case lngOutputColumn
-        Case 3, 4, 7, 8, 11
+        Case 3, 4, 7, 8, 11, 15, 16
             IsLHSDateOutputColumn = True
         Case Else
             IsLHSDateOutputColumn = False
@@ -238,6 +299,86 @@ ErrHandler:
     Call ErrorManager.addError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-09-17
+' Parameters:    wksSource - LHS sheet; strHeader - optional row-1 header
+' Returns:       Long - matching source column, or 0 when the header is absent
+' Description:   Resolves optional diagnostic fields without depending on a fixed
+'                source column letter. Comparison is trimmed and case-insensitive.
+'-------------------------------------------------------------------------------
+Private Function FindOptionalHeaderColumn( _
+    ByVal wksSource As Excel.Worksheet, ByVal strHeader As String) As Long
+
+    Const METHOD_NAME As String = "FindOptionalHeaderColumn"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim lngColumn As Long
+    Dim lngLastColumn As Long
+    Dim strActual As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    lngLastColumn = wksSource.Cells(1, wksSource.Columns.Count).End(xlToLeft).Column
+
+    For lngColumn = 1 To lngLastColumn
+        strActual = Trim$(CStr(wksSource.Cells(1, lngColumn).Value2))
+        If StrComp(strActual, Trim$(strHeader), vbTextCompare) = 0 Then
+            FindOptionalHeaderColumn = lngColumn
+            Exit For
+        End If
+    Next lngColumn
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError( _
+        CLASS_NAME, METHOD_NAME, errNumber, errDescription, _
+        "strHeader", strHeader)
+    GoTo ExitPoint
+End Function
+
+Private Sub ValidateFixedHeader( _
+    ByVal wksSource As Excel.Worksheet, ByVal lngColumn As Long, _
+    ByVal strExpected As String)
+
+    Const METHOD_NAME As String = "ValidateFixedHeader"
+    Dim errDescription As String
+    Dim errNumber As Long
+    Dim strActual As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    strActual = Trim$(CStr(wksSource.Cells(1, lngColumn).Value2))
+
+    If StrComp(strActual, strExpected, vbTextCompare) <> 0 Then
+        Err.Raise ERR_LHS, METHOD_NAME, _
+            "Unexpected LHS header in column " & _
+            wksSource.Cells(1, lngColumn).Address(False, False) & _
+            ". Expected '" & strExpected & "', found '" & strActual & "'."
+    End If
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call ErrorManager.addError( _
+        CLASS_NAME, METHOD_NAME, errNumber, errDescription, _
+        "lngColumn", lngColumn)
+    GoTo ExitPoint
+End Sub
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
