@@ -3,8 +3,8 @@ Option Explicit
 Private Const CLASS_NAME As String = "modInputLHS"
 Private Const LHS_SHEET_NAME As String = "FAMOO-Full Inventory IFRS"
 Private Const LHS_QUANTITY_COLUMN As Long = 10
-Private Const LHS_REIMBURSEMENT_FACTOR_COLUMN As Long = 48
-Private Const LHS_FACE_VALUE_COLUMN As Long = 104
+Private Const LHS_REIMBURSEMENT_FACTOR_COLUMN As Long = 74
+Private Const LHS_FACE_VALUE_COLUMN As Long = 130
 Private Const ERR_LHS As Long = vbObjectError + 6400
 
 '-------------------------------------------------------------------------------
@@ -27,6 +27,7 @@ Public Function LoadLHSInput( _
     Dim errDescription As String
     Dim errNumber As Long
     Dim lngColIndex As Long
+    Dim lngGtiNameColumn As Long
     Dim lngLastRow As Long
     Dim lngOutputColumn As Long
     Dim lngOptionalColumn As Long
@@ -37,7 +38,7 @@ Public Function LoadLHSInput( _
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     ' Fixed LHS source columns: ED=134, EK=141, BP=68 and BS=71.
-    arrColumns = Array(1&, 9&, 115&, 114&, 116&, 130&, 134&, 141&, 68&, 71&, 66&, 35&, 15&, 16&)
+    ' GTI NAME is resolved by header name because FACE VALUE is fixed in DZ (130).
     arrHeaders = Array( _
         "FUND CODE", _
         "EXTERNAL VALUE CODE", _
@@ -65,6 +66,15 @@ Public Function LoadLHSInput( _
 
     Set wkbSource = GetOrOpenWorkbookReadOnly(strFullPath, blnOpenedByMacro)
     Set wksSource = GetWorksheetByName(wkbSource, LHS_SHEET_NAME)
+
+    lngGtiNameColumn = FindOptionalHeaderColumn(wksSource, "GTI NAME")
+    If lngGtiNameColumn = 0 Then
+        Err.Raise ERR_LHS, METHOD_NAME, "Required LHS header 'GTI NAME' was not found in row 1."
+    End If
+
+    arrColumns = Array( _
+        1&, 9&, 115&, 114&, 116&, lngGtiNameColumn, 134&, 141&, _
+        68&, 71&, 66&, 35&, 15&, 16&)
 
     Call ValidateLHSHeaders(wksSource, arrColumns, arrHeaders)
     Call ValidateFixedHeader(wksSource, LHS_QUANTITY_COLUMN, "QUANTITY")
